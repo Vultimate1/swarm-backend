@@ -7,11 +7,15 @@ const nodemailer = require("nodemailer");
 const app = express();
 app.use(cors());
 
-const upload = multer({ dest: "uploads/" });
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+//const upload = multer({ dest: "uploads/" });
 app.get("/", (req, res) => {
   res.send("Backend is running");
 });
 app.post("/send-email", upload.single("file"), async (req, res) => {
+  console.log(req.file);  // check if file arrives
+  console.log(req.body);  // check body
   try {
     const transporter = nodemailer.createTransport({
       service: "gmail",
@@ -36,11 +40,10 @@ app.post("/send-email", upload.single("file"), async (req, res) => {
 
     res.send("Email sent!");
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Error sending email");
+    console.error("Error sending email:", err);
+    res.status(500).send({ error: err.message });
   }
 });
-
 
 app.listen(process.env.PORT || 5000, () => {
   console.log("Server running");
