@@ -1,4 +1,4 @@
-require("dotenv").config();
+/*require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
@@ -49,4 +49,76 @@ app.post("/send-email", upload.single("file"), async (req, res) => {
 
 app.listen(process.env.PORT || 5000, () => {
   console.log("Server running");
+});*/
+
+
+const express = require('express');
+const nodemailer = require('nodemailer');
+const bodyParser = require('body-parser');
+const { ConfidentialClientApplication } = require('@azure/msal-node');
+
+const app = express();
+app.use(bodyParser.json());
+const PORT = process.env.PORT || 3000;
+
+const CLIENT_ID = process.env.AZURE_CLIENT_ID;
+const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
+const TENANT_ID = process.env.AZURE_TENANT_ID;
+const OUTLOOK_EMAIL = process.env.OUTLOOK_EMAIL;
+
+// MSAL config for OAuth2
+const msalConfig = {
+  auth: {
+    clientId: CLIENT_ID,
+    clientSecret: CLIENT_SECRET,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+  },
+};
+
+const msalClient = new ConfidentialClientApplication(msalConfig);
+
+// Get OAuth2 access token
+async function getAccessToken() {
+  const result = await msalClient.acquireTokenByClientCredential({
+    scopes: ['https://graph.microsoft.com/.default'],
+  });
+  return result.accessToken;
+}
+
+// Build transporter using fresh token
+async function createTransporter() {
+  const accessToken = await getAccessToken();
+  return nodemailer.createTransport({
+    host: 'smtp.office365.com',
+    port: 587,
+    secure: false,
+    auth: {
+      type: 'OAuth2',
+      user: OUTLOOK_EMAIL,
+      accessToken,
+    },
+  });
+}
+
+app.post('/send-email', async (req, res) => {
+  const { to, subject, text, html } = req.body;
+  if (!to || !subject || (!text && !html)) {
+    return res.status(400).json({ error: 'Missing required fields: to, subject, text/html' });
+  }
+  try {
+    const transporter = await createTransporter();
+    const info = await transporter.sendMail({
+      from: OUTLOOK_EMAIL,
+      to,
+      subject,
+      text,
+      html,
+    });
+    res.json({ success: true, messageId: info.messageId });
+  } catch (error) {
+    console.error('Error sending email:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
