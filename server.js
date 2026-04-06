@@ -14,11 +14,13 @@ app.get("/", (req, res) => {
   res.send("Backend is running");
 });
 app.post("/send-email", upload.single("file"), async (req, res) => {
-  console.log(req.file);  // check if file arrives
-  console.log(req.body);  // check body
+  if (!req.file) return res.status(400).send("No file uploaded");
+
   try {
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+      host: "smtp.office365.com",
+      port: 587,
+      secure: false,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
@@ -33,14 +35,14 @@ app.post("/send-email", upload.single("file"), async (req, res) => {
       attachments: [
         {
           filename: req.file.originalname,
-          path: req.file.path
+          content: req.file.buffer
         }
       ]
     });
 
     res.send("Email sent!");
   } catch (err) {
-    console.error("Error sending email:", err);
+    console.error("Email error:", err);
     res.status(500).send({ error: err.message });
   }
 });
