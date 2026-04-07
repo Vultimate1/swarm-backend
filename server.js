@@ -269,16 +269,17 @@ const uploadFile = await fetch(
     body: file.buffer,
   }
 );
-const fileResult = await uploadFile.json();
+let fileUrl;
 if (!uploadFile.ok) {
   const errorData = await uploadFile.json();
   console.error("Upload failed:", errorData);
   return res.status(500).json({ error: errorData.error?.message || "Upload failed" });
+} else {
+  const fileResult = await uploadFile.json();
+  fileUrl = fileResult.webUrl;
+  console.log("Uploaded file URL:", fileUrl);
+  console.log("Uploaded file:", fileResult.webUrl);
 }
-const fileUrl = fileResult.webUrl;
-console.log("Uploaded file URL:", fileUrl);
-console.log("Uploaded file:", fileResult.webUrl);
-
   // ✅ STEP 2: Send email (with link instead of attachment)
   const message = {
     message: {
