@@ -220,23 +220,23 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
 
   // ✅ STEP 1: Upload to OneDrive
 // 1. Ensure folder exists or create it
-const folderName = "SwarmResults";
+if (!file) {
+  return res.status(400).json({ error: "No file uploaded" });
+}
 
+// Step 1: Ensure folder exists
+const folderName = "SwarmResults";
 let folderId = null;
 
-// Try to get folder first
 const folderCheck = await fetch(
   `https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq '${folderName}' and folder ne null`,
-  {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  }
+  { headers: { Authorization: `Bearer ${accessToken}` } }
 );
 const folderData = await folderCheck.json();
 
 if (folderData.value && folderData.value.length > 0) {
   folderId = folderData.value[0].id;
 } else {
-  // Folder doesn't exist → create it
   const createFolder = await fetch(
     `https://graph.microsoft.com/v1.0/me/drive/root/children`,
     {
@@ -253,11 +253,15 @@ if (folderData.value && folderData.value.length > 0) {
     }
   );
   const newFolder = await createFolder.json();
+  if (!createFolder.ok) {
+    console.error("Folder creation failed:", await createFolder.text());
+    return res.status(500).json({ error: "Folder creation failed" });
+  }
   folderId = newFolder.id;
 }
 
-// 2. Upload file into folder
-const fileName = `${Date.now()}-${file.originalname}`;
+// Step 2: Upload file
+const fileName = `${Date.now()}-${encodeURIComponent(file.originalname)}`;
 const uploadFile = await fetch(
   `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${fileName}/content`,
   {
@@ -269,16 +273,16 @@ const uploadFile = await fetch(
     body: file.buffer,
   }
 );
+
 let fileUrl;
 if (!uploadFile.ok) {
-  const errorData = await uploadFile.json();
-  console.error("Upload failed:", errorData);
-  return res.status(500).json({ error: errorData.error?.message || "Upload failed" });
+  const errorText = await uploadFile.text();
+  console.error("Upload failed:", errorText);
+  return res.status(500).json({ error: errorText });
 } else {
   const fileResult = await uploadFile.json();
   fileUrl = fileResult.webUrl;
   console.log("Uploaded file URL:", fileUrl);
-  console.log("Uploaded file:", fileResult.webUrl);
 }
   // ✅ STEP 2: Send email (with link instead of attachment)
   const message = {
