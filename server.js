@@ -55,18 +55,25 @@ app.listen(process.env.PORT || 5000, () => {
 const express = require('express');
 const nodemailer = require('nodemailer');
 const bodyParser = require('body-parser');
+const cors = require('cors');
 const { ConfidentialClientApplication } = require('@azure/msal-node');
 
 const app = express();
+app.use(cors());
 app.use(bodyParser.json());
-const PORT = process.env.PORT || 3000;
 
+const PORT = process.env.PORT || 3000;
 const CLIENT_ID = process.env.AZURE_CLIENT_ID;
 const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 const TENANT_ID = process.env.AZURE_TENANT_ID;
 const OUTLOOK_EMAIL = process.env.OUTLOOK_EMAIL;
 
-// MSAL config for OAuth2
+// Debug check - remove after confirming it works
+console.log('CLIENT_ID:', CLIENT_ID);
+console.log('TENANT_ID:', TENANT_ID);
+console.log('SECRET exists:', !!CLIENT_SECRET);
+console.log('SECRET length:', CLIENT_SECRET?.length);
+
 const msalConfig = {
   auth: {
     clientId: CLIENT_ID,
@@ -77,7 +84,6 @@ const msalConfig = {
 
 const msalClient = new ConfidentialClientApplication(msalConfig);
 
-// Get OAuth2 access token
 async function getAccessToken() {
   const result = await msalClient.acquireTokenByClientCredential({
     scopes: ['https://graph.microsoft.com/.default'],
@@ -85,7 +91,6 @@ async function getAccessToken() {
   return result.accessToken;
 }
 
-// Build transporter using fresh token
 async function createTransporter() {
   const accessToken = await getAccessToken();
   return nodemailer.createTransport({
@@ -99,6 +104,10 @@ async function createTransporter() {
     },
   });
 }
+
+app.get('/', (req, res) => {
+  res.send('Backend is running');
+});
 
 app.post('/send-email', async (req, res) => {
   const { to, subject, text, html } = req.body;
