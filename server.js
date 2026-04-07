@@ -203,63 +203,135 @@ app.get('/auth/status', async (req, res) => {
 });
 
 app.post('/send-email', upload.single('file'), async (req, res) => {
-  const accessToken = await getAccessToken();
-  if (!accessToken) {
-    return res.status(401).json({ error: 'Not authenticated' });
-  }
+  try {
+    const accessToken = await getAccessToken();
+    if (!accessToken) return res.status(401).json({ error: 'Not authenticated' });
 
-  const { to, subject, text, html } = req.body;
-  const file = req.file;
+    const { to, subject, text, html } = req.body;
+    const file = req.file;
 
-  if (!to || !subject || (!text && !html)) {
-    return res.status(400).json({ error: 'Missing fields' });
-  }
-
-console.log("BODY:", req.body);
-console.log("FILE:", req.file);
-
-  const attachments = file
-    ? [
-        {
-          '@odata.type': '#microsoft.graph.fileAttachment',
-          name: file.originalname,
-          contentType: file.mimetype,
-          contentBytes: file.buffer.toString('base64'),
-        },
-      ]
-    : [];
-
-  const message = {
-    message: {
-      subject,
-      body: {
-        contentType: html ? 'HTML' : 'Text',
-        content: html || text,
-      },
-      toRecipients: [{ emailAddress: { address: to } }],
-      attachments,
-    },
-    saveToSentItems: true,
-  };
-
-  const response = await fetch(
-    'https://graph.microsoft.com/v1.0/me/sendMail',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
+    if (!to || !subject || (!text && !html)) {
+      return res.status(400).json({ error: 'Missing fields' });
     }
-  );
 
-  if (response.status === 202) {
-    res.json({ success: true });
-  } else {
-    const error = await response.json();
-    res.status(500).json({ error: error.error?.message });
+    console.log("BODY:", req.body);
+    console.log("FILE:", req.file);
+
+    let fileUrl = "";
+
+    // ✅ Upload file to OneDrive if present
+    if (file) {
+      const folderName = "SwarmResults";
+      let folderId = null;
+
+      // Check if folder exists
+      const folderCheck = await fetch(
+        `https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq '${folderName}' and folder ne null`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const folderData = await folderCheck.json();
+      if (folderData.value && folderData.value.length > 0) {
+        folderId = folderData.value[0].id;
+      } else {
+        // Create folder
+        const createFolder = await fetch(
+          `https://graph.microsoft.com/v1.0/me/drive/root/children`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              name: folderName,
+              folder: {},
+              "@microsoft.graph.conflictBehavior": "rename",
+            }),
+          }
+        );
+        const newFolder = await createFolder.json();
+        if (!createFolder.ok) {
+          const errText = await createFolder.text();
+          console.error("Folder creation failed:", errText);
+          return res.status(500).json({ error: "Folder creation failed" });
+        }
+        folderId = newFolder.id;
+      }
+
+      // Upload file
+      const fileName = `${Date.now()}-${encodeURIComponent(file.originalname)}`;
+      const uploadFile = await fetch(
+        `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${fileName}/content`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": file.mimetype || "application/octet-stream",
+          },
+          body: file.buffer,
+        }
+      );
+      if (!uploadFile.ok) {
+        const errorText = await uploadFile.text();
+        console.error("Upload failed:", errorText);
+        return res.status(500).json({ error: errorText });
+      }
+      const fileResult = await uploadFile.json();
+      fileUrl = fileResult.webUrl || "";
+    }
+
+    // ✅ Prepare attachment (as before)
+    const attachments = file
+      ? [
+          {
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: file.originalname,
+            contentType: file.mimetype,
+            contentBytes: file.buffer.toString('base64'),
+          },
+        ]
+      : [];
+
+    // ✅ Construct email message
+    const emailMessage = {
+      message: {
+        subject,
+        body: {
+          contentType: html ? 'HTML' : 'Text',
+          content: (html || text) + (fileUrl ? `\n\nFile also uploaded to OneDrive: ${fileUrl}` : ""),
+        },
+        toRecipients: [{ emailAddress: { address: to } }],
+        attachments,
+      },
+      saveToSentItems: true,
+    };
+
+    console.log("Sending email payload:", JSON.stringify(emailMessage, null, 2));
+
+    // ✅ Send email
+    const response = await fetch(
+      'https://graph.microsoft.com/v1.0/me/sendMail',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(emailMessage),
+      }
+    );
+
+    if (response.status === 202) {
+      return res.json({ success: true, fileUrl });
+    }
+
+    const errorData = await response.json();
+    console.error("Mail error:", errorData);
+    return res.status(500).json({ error: errorData.error?.message || "Email send failed" });
+
+  } catch (err) {
+    console.error("Send email exception:", err);
+    return res.status(500).json({ error: err.message });
   }
 });
-
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
