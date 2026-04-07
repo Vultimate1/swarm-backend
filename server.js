@@ -52,8 +52,9 @@ app.listen(process.env.PORT || 5000, () => {
 });*/
 
 
+
+
 const express = require('express');
-const nodemailer = require('nodemailer');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const { ConfidentialClientApplication } = require('@azure/msal-node');
@@ -68,41 +69,19 @@ const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 const TENANT_ID = process.env.AZURE_TENANT_ID;
 const OUTLOOK_EMAIL = process.env.OUTLOOK_EMAIL;
 
-// Debug check - remove after confirming it works
-console.log('CLIENT_ID:', CLIENT_ID);
-console.log('TENANT_ID:', TENANT_ID);
-console.log('SECRET exists:', !!CLIENT_SECRET);
-console.log('SECRET length:', CLIENT_SECRET?.length);
-
-const msalConfig = {
+const msalClient = new ConfidentialClientApplication({
   auth: {
     clientId: CLIENT_ID,
     clientSecret: CLIENT_SECRET,
     authority: `https://login.microsoftonline.com/${TENANT_ID}`,
   },
-};
-
-const msalClient = new ConfidentialClientApplication(msalConfig);
+});
 
 async function getAccessToken() {
   const result = await msalClient.acquireTokenByClientCredential({
     scopes: ['https://graph.microsoft.com/.default'],
   });
   return result.accessToken;
-}
-
-async function createTransporter() {
-  const accessToken = await getAccessToken();
-  return nodemailer.createTransport({
-    host: 'smtp.office365.com',
-    port: 587,
-    secure: false,
-    auth: {
-      type: 'OAuth2',
-      user: OUTLOOK_EMAIL,
-      accessToken,
-    },
-  });
 }
 
 app.get('/', (req, res) => {
@@ -114,16 +93,45 @@ app.post('/send-email', async (req, res) => {
   if (!to || !subject || (!text && !html)) {
     return res.status(400).json({ error: 'Missing required fields: to, subject, text/html' });
   }
+
   try {
-    const transporter = await createTransporter();
-    const info = await transporter.sendMail({
-      from: OUTLOOK_EMAIL,
-      to,
-      subject,
-      text,
-      html,
-    });
-    res.json({ success: true, messageId: info.messageId });
+    const accessToken = await getAccessToken();
+
+    const message = {
+      message: {
+        subject,
+        body: {
+          contentType: html ? 'HTML' : 'Text',
+          content: html || text,
+        },
+        toRecipients: [
+          {
+            emailAddress: { address: to },
+          },
+        ],
+      },
+      saveToSentItems: true,
+    };
+
+    const response = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${OUTLOOK_EMAIL}/sendMail`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message),
+      }
+    );
+
+    if (response.status === 202) {
+      res.json({ success: true });
+    } else {
+      const error = await response.json();
+      console.error('Graph API error:', error);
+      res.status(500).json({ error: error.error?.message || 'Failed to send email' });
+    }
   } catch (error) {
     console.error('Error sending email:', error);
     res.status(500).json({ error: error.message });
