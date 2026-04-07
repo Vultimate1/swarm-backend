@@ -144,6 +144,16 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
+app.get('/debug', (req, res) => {
+  res.json({
+    clientId: CLIENT_ID ? `${CLIENT_ID.substring(0, 8)}...` : 'MISSING',
+    tenantId: TENANT_ID ? `${TENANT_ID.substring(0, 8)}...` : 'MISSING',
+    secretExists: !!CLIENT_SECRET,
+    email: OUTLOOK_EMAIL || 'MISSING',
+    redirectUri: REDIRECT_URI,
+  });
+});
+
 app.post('/send-email', async (req, res) => {
   if (!cachedToken) {
     return res.status(401).json({ error: 'Not authenticated. Visit /auth first.' });
