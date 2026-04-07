@@ -70,12 +70,26 @@ const TENANT_ID = process.env.AZURE_TENANT_ID;
 const OUTLOOK_EMAIL = process.env.OUTLOOK_EMAIL;
 const REDIRECT_URI = 'https://swarm-backend-ga0y.onrender.com/auth/callback';
 
+const cachePlugin = {
+  beforeCacheAccess: async (cacheContext) => {
+    if (fs.existsSync(TOKEN_PATH)) {
+       cacheContext.tokenCache.deserialize(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+    }
+  },
+  afterCacheAccess: async (cacheContext) => {
+    if (cacheContext.cacheHasChanged) {
+       fs.writeFileSync(TOKEN_PATH, cacheContext.tokenCache.serialize());
+    }
+  },
+};
+
 const msalClient = new ConfidentialClientApplication({
   auth: {
     clientId: CLIENT_ID,
     clientSecret: CLIENT_SECRET,
     authority: `https://login.microsoftonline.com/${TENANT_ID}`,
   },
+  cache: { cachePlugin },
 });
 
 // Store token in memory
@@ -84,11 +98,22 @@ let cachedToken = null;
 app.get('/', (req, res) => res.send('Backend is running'));
 
 async function getAccessToken() {
-  const result = await msalClient.acquireTokenByClientCredential({
-    scopes: ['https://graph.microsoft.com/.default'],
-  });
-  return result.accessToken;
+  const result = await msalClient.getTokenCache().getAllAccounts();
+  if (accounts.length === 0) return null;
+
+  try {
+    const result = await msalClient.acquireTokenSilent({
+      account: accounts[0],
+      scopes: ['Mail.send'],
+    });
+    return result.accessToken;
+  } catch (err) {
+    console.error('Silent token refresh failed:', err.message);
+    return null;
+  }
 }
+
+app.get('/', (req, res) => res.send('Backend is running'));
 
 app.get('/auth', (req, res) => {
   const authUrl = msalClient.getAuthCodeUrl({
