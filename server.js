@@ -285,7 +285,7 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     }
 
     // ✅ Build email payload
-    const bodyContent = (html && html.trim()) || `${text || ""}\n\n${fileUrl ? `File uploaded here: ${fileUrl}` : ""}`;
+    bodyContent = (html && html.trim()) || `${text || ""}\n\n${fileUrl ? `File uploaded here: ${fileUrl}` : ""}`;
     const contentType = (html && html.trim()) ? 'HTML' : 'Text';
     const emailBody = `${text || ""}\n\n${fileUrl ? `File uploaded here: ${fileUrl}` : ""}`;
     const message = {
