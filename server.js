@@ -274,29 +274,36 @@ const uploadFile = await fetch(
   }
 );
 
-let fileUrl;
+let fileUrl = "";
 if (!uploadFile.ok) {
   const errorText = await uploadFile.text();
   console.error("Upload failed:", errorText);
   return res.status(500).json({ error: errorText });
 } else {
   const fileResult = await uploadFile.json();
-  fileUrl = fileResult.webUrl;
+  fileUrl = fileResult.webUrl || "";
   console.log("Uploaded file URL:", fileUrl);
 }
+const recipient = (to || OUTLOOK_EMAIL || "").trim();
+if (!recipient || !recipient.includes("@")) {
+  return res.status(400).json({ error: "Invalid recipient email" });
+}
+const emailSubject = (subject || "No Subject").toString();
+const emailBody = `${text || ""}\n\nFile uploaded here: ${fileUrl || ""}`;
+
   // ✅ STEP 2: Send email (with link instead of attachment)
   const message = {
     message: {
-      subject,
+      subject: emailSubject,
       body: {
-        contentType: 'Text',
-        content: `${text}\n\nFile uploaded here: ${fileUrl || 'No file uploaded'}`,
+        contentType: html ? 'HTML' : 'Text',
+        content: emailBody,
       },
-      toRecipients: [{ emailAddress: { address: to || OUTLOOK_EMAIL } }],
+      toRecipients: [{ emailAddress: { address: recipient } }],
     },
     saveToSentItems: true,
   };
-
+console.log("Sending email payload:", JSON.stringify(message, null, 2));
   const response = await fetch(
     'https://graph.microsoft.com/v1.0/me/sendMail',
     {
