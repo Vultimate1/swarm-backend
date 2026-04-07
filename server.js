@@ -275,7 +275,6 @@ if (!uploadFile.ok) {
   console.error("Upload failed:", errorData);
   return res.status(500).json({ error: errorData.error?.message || "Upload failed" });
 }
-const fileResult = await uploadFile.json();
 const fileUrl = fileResult.webUrl;
 console.log("Uploaded file URL:", fileUrl);
 console.log("Uploaded file:", fileResult.webUrl);
