@@ -57,7 +57,8 @@ app.listen(process.env.PORT || 5000, () => {
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const { ConfidentialClientApplication } = require('@azure/msal-node');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(cors());
@@ -69,99 +70,147 @@ const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 const TENANT_ID = process.env.AZURE_TENANT_ID;
 const OUTLOOK_EMAIL = process.env.OUTLOOK_EMAIL;
 const REDIRECT_URI = 'https://swarm-backend-ga0y.onrender.com/auth/callback';
+const TOKEN_PATH = path.join(__dirname, 'token_cache.json');
 
-const cachePlugin = {
-  beforeCacheAccess: async (cacheContext) => {
-    if (fs.existsSync(TOKEN_PATH)) {
-       cacheContext.tokenCache.deserialize(fs.readFileSync(TOKEN_PATH, 'utf-8'));
-    }
-  },
-  afterCacheAccess: async (cacheContext) => {
-    if (cacheContext.cacheHasChanged) {
-       fs.writeFileSync(TOKEN_PATH, cacheContext.tokenCache.serialize());
-    }
-  },
-};
-
-const msalClient = new ConfidentialClientApplication({
-  auth: {
-    clientId: CLIENT_ID,
-    clientSecret: CLIENT_SECRET,
-    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-  },
-  cache: { cachePlugin },
-});
-
-// Store token in memory
-let cachedToken = null;
-
-app.get('/', (req, res) => res.send('Backend is running'));
-
-async function getAccessToken() {
-  const result = await msalClient.getTokenCache().getAllAccounts();
-  if (accounts.length === 0) return null;
-
+// Load token from disk if exists
+let tokenData = null;
+if (fs.existsSync(TOKEN_PATH)) {
   try {
-    const result = await msalClient.acquireTokenSilent({
-      account: accounts[0],
-      scopes: ['Mail.send'],
-    });
-    return result.accessToken;
-  } catch (err) {
-    console.error('Silent token refresh failed:', err.message);
-    return null;
+    tokenData = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+    console.log('Loaded token from cache');
+  } catch (e) {
+    console.log('No valid token cache found');
   }
+}
+
+// Save token to disk
+function saveToken(data) {
+  tokenData = data;
+  fs.writeFileSync(TOKEN_PATH, JSON.stringify(data));
+}
+
+// Refresh access token using refresh token
+async function refreshAccessToken() {
+  if (!tokenData?.refresh_token) return null;
+
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
+    refresh_token: tokenData.refresh_token,
+    grant_type: 'refresh_token',
+    scope: 'https://graph.microsoft.com/Mail.Send offline_access',
+  });
+
+  const response = await fetch(
+    `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    }
+  );
+
+  const data = await response.json();
+  if (data.access_token) {
+    saveToken(data);
+    console.log('Token refreshed successfully');
+    return data.access_token;
+  }
+  console.error('Token refresh failed:', data);
+  return null;
+}
+
+// Get valid access token
+async function getAccessToken() {
+  if (!tokenData) return null;
+
+  // Check if token is expired (with 5 min buffer)
+  const expiresAt = tokenData.expires_at || 0;
+  if (Date.now() < expiresAt - 300000) {
+    return tokenData.access_token;
+  }
+
+  // Refresh if expired
+  return await refreshAccessToken();
 }
 
 app.get('/', (req, res) => res.send('Backend is running'));
 
-app.get('/auth', async (req, res) => {
-  try {
-    const url = await msalClient.getAuthCodeUrl({
-      scopes: ['Mail.Send', 'offline_access'],
-      redirectUri: REDIRECT_URI,
-    });
-    console.log('Auth URL:', url); // check Render logs for this
-    res.redirect(url);
-  } catch (err) {
-    console.error('Auth URL error:', err);
-    res.status(500).send('Failed: ' + err.message);
-  }
+// Step 1: Redirect to Microsoft login
+app.get('/auth', (req, res) => {
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: REDIRECT_URI,
+    scope: 'https://graph.microsoft.com/Mail.Send offline_access',
+    response_mode: 'query',
+  });
+
+  const authUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize?${params}`;
+  console.log('Redirecting to Microsoft login');
+  res.redirect(authUrl);
 });
 
+// Step 2: Handle callback
 app.get('/auth/callback', async (req, res) => {
-  const {code} = req.query;
+  const { code, error } = req.query;
+
+  if (error) {
+    return res.status(400).send(`Auth error: ${error} - ${req.query.error_description}`);
+  }
+
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
+    code,
+    redirect_uri: REDIRECT_URI,
+    grant_type: 'authorization_code',
+    scope: 'https://graph.microsoft.com/Mail.Send offline_access',
+  });
+
   try {
-    const result = await msalClient.acquireTokenByCode({
-      scopes: ['Mail.Send'],
-      redirectUrl: REDIRECT_URI,
-    });
-    cachedToken = result.accessToken;
-    res.send('Auth successful! You can now send emails.');
+    const response = await fetch(
+      `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params,
+      }
+    );
+
+    const data = await response.json();
+    if (data.access_token) {
+      // Store expiry time
+      data.expires_at = Date.now() + data.expires_in * 1000;
+      saveToken(data);
+      res.send('✅ Auth successful! You can now send emails.');
+    } else {
+      console.error('Token error:', data);
+      res.status(500).send(`Token error: ${data.error_description}`);
+    }
   } catch (err) {
-    console.error('Auth error:', err);
+    console.error('Callback error:', err);
     res.status(500).send('Auth failed: ' + err.message);
   }
 });
 
-app.get('/debug', (req, res) => {
-  res.json({
-    clientId: CLIENT_ID ? `${CLIENT_ID.substring(0, 8)}...` : 'MISSING',
-    tenantId: TENANT_ID ? `${TENANT_ID.substring(0, 8)}...` : 'MISSING',
-    secretExists: !!CLIENT_SECRET,
-    email: OUTLOOK_EMAIL || 'MISSING',
-    redirectUri: REDIRECT_URI,
-  });
+// Check auth status
+app.get('/auth/status', async (req, res) => {
+  const token = await getAccessToken();
+  res.json({ authenticated: !!token });
 });
 
 app.post('/send-email', async (req, res) => {
-  if (!cachedToken) {
-    return res.status(401).json({ error: 'Not authenticated. Visit /auth first.' });
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    return res.status(401).json({
+      error: 'Not authenticated. Visit https://swarm-backend-ga0y.onrender.com/auth to login.',
+    });
   }
 
   const { to, subject, text, html } = req.body;
   if (!to || !subject || (!text && !html)) {
-    return res.status(400).json({ error: 'Missing required fields' });
+    return res.status(400).json({ error: 'Missing required fields: to, subject, text/html' });
   }
 
   try {
@@ -178,11 +227,11 @@ app.post('/send-email', async (req, res) => {
     };
 
     const response = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${OUTLOOK_EMAIL}/sendMail`,
+      'https://graph.microsoft.com/v1.0/me/sendMail',
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${cachedToken}`,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(message),
@@ -193,9 +242,11 @@ app.post('/send-email', async (req, res) => {
       res.json({ success: true });
     } else {
       const error = await response.json();
+      console.error('Graph API error:', error);
       res.status(500).json({ error: error.error?.message });
     }
   } catch (error) {
+    console.error('Error sending email:', error);
     res.status(500).json({ error: error.message });
   }
 });
