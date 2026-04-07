@@ -217,38 +217,62 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
 
     let fileUrl = '';
 
-    // -------- Upload to OneDrive if file exists --------
-    if (file) {
-      const folderName = 'SwarmResults';
-      let folderId = null;
+// Upload file to OneDrive (for files < 4MB)
+if (file) {
+  const folderName = 'SwarmResults';
+  let folderId = null;
 
-      // Check folder
-      const folderResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq '${folderName}' and folder ne null`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const folderData = await folderResp.json();
-      if (folderData.value && folderData.value.length > 0) folderId = folderData.value[0].id;
-      else {
-        // create folder
-        const createResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root/children`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: folderName, folder: {}, "@microsoft.graph.conflictBehavior": "rename" })
-        });
-        const newFolder = await createResp.json();
-        folderId = newFolder.id;
-      }
+  // Check folder
+  const folderResp = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq '${folderName}' and folder ne null`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const folderData = await folderResp.json();
+  if (folderData.value && folderData.value.length > 0) {
+    folderId = folderData.value[0].id;
+  } else {
+    // Create folder
+    const createFolder = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root/children`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: folderName,
+        folder: {},
+        "@microsoft.graph.conflictBehavior": "rename",
+      }),
+    });
+    const newFolder = await createFolder.json();
+    folderId = newFolder.id;
+  }
 
-      // upload file
-      const fileName = `${Date.now()}-${file.originalname}`;
-      const uploadResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${fileName}/content`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': file.mimetype || 'application/octet-stream' },
-        body: file.buffer
-      });
-      const fileResult = await uploadResp.json();
-      fileUrl = fileResult.webUrl || '';
+  // --- Correct file upload ---
+  const fileName = `${Date.now()}-${file.originalname}`;
+  const uploadResp = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}:/${fileName}:/content`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': file.mimetype || 'application/octet-stream',
+      },
+      body: file.buffer,
     }
+  );
+
+  if (!uploadResp.ok) {
+    const errText = await uploadResp.text();
+    console.error('File upload failed:', errText);
+    throw new Error(`OneDrive upload failed: ${errText}`);
+  }
+
+  const uploadResult = await uploadResp.json();
+  fileUrl = uploadResult.webUrl || '';
+  console.log('Uploaded file URL:', fileUrl);
+}
+
 
     // -------- Prepare email with attachment --------
     const attachments = file ? [
