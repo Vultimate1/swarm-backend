@@ -222,6 +222,29 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
   let fileUrl = null;
 
   if (file) {
+
+const folderName = 'SwarmResults';
+
+// Create or get folder
+const folderResponse = await fetch(
+  `https://graph.microsoft.com/v1.0/me/drive/root/children`,
+  {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: folderName,
+      folder: {}, // tells Graph API this is a folder
+      '@microsoft.graph.conflictBehavior': 'rename' // avoids conflicts
+    }),
+  }
+);
+
+const folderData = await folderResponse.json();
+const folderId = folderData.id;
+
     const uploadResponse = await fetch(
       `https://graph.microsoft.com/v1.0/me/drive/root:/SwarmResults/${Date.now()}-${file.originalname}:/content`,
       {
@@ -235,6 +258,7 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     );
 
     const result = await uploadResponse.json();
+    console.log('Uploaded file URL:', result.webUrl);
 
     if (!uploadResponse.ok) {
       console.error("Upload failed:", result);
