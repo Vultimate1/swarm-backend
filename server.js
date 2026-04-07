@@ -218,7 +218,6 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
 
     // ✅ Ensure subject and body are strings
     subject = (subject || "No Subject").toString();
-    const bodyContent = `${text || ""}${html ? "" : ""}${file ? `\n\nFile uploaded here: ` : ""}`;
 
     let fileUrl = "";
 
@@ -285,20 +284,20 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     }
 
     // ✅ Build email payload
-    bodyContent = (html && html.trim()) || `${text || ""}\n\n${fileUrl ? `File uploaded here: ${fileUrl}` : ""}`;
-    const contentType = (html && html.trim()) ? 'HTML' : 'Text';
-    const emailBody = `${text || ""}\n\n${fileUrl ? `File uploaded here: ${fileUrl}` : ""}`;
-    const message = {
-      message: {
-        subject,
-        body: {
-          contentType,
-          content: bodyContent,
-        },
-        toRecipients: [{ emailAddress: { address: to } }],
-      },
-      saveToSentItems: true,
-    };
+const bodyContent = (html && html.trim()) || (text && text.trim()) || "No content";
+const contentType = (html && html.trim()) ? 'HTML' : 'Text';
+
+const message = {
+  message: {
+    subject: (subject || "No Subject").toString(),
+    body: {
+      contentType,
+      content: `${bodyContent}${fileUrl ? `\n\nFile uploaded here: ${fileUrl}` : ""}`,
+    },
+    toRecipients: [{ emailAddress: { address: to } }],
+  },
+  saveToSentItems: true,
+};
 
     console.log("Sending email payload:", JSON.stringify(message, null, 2));
 
