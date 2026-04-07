@@ -144,7 +144,7 @@ app.get('/auth', (req, res) => {
     client_id: CLIENT_ID,
     response_type: 'code',
     redirect_uri: REDIRECT_URI,
-    scope: 'https://graph.microsoft.com/Mail.Send offline_access',
+    scope: 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Files.ReadWrite offline_access',
     response_mode: 'query',
   });
 
@@ -167,7 +167,7 @@ app.get('/auth/callback', async (req, res) => {
     code,
     redirect_uri: REDIRECT_URI,
     grant_type: 'authorization_code',
-    scope: 'https://graph.microsoft.com/Mail.Send offline_access',
+    scope: 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Files.ReadWrite offline_access'
   });
 
   try {
@@ -215,29 +215,45 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     return res.status(400).json({ error: 'Missing fields' });
   }
 
-console.log("BODY:", req.body);
-console.log("FILE:", req.file);
+  console.log("BODY:", req.body);
+  console.log("FILE:", req.file);
 
-  const attachments = file
-    ? [
-        {
-          '@odata.type': '#microsoft.graph.fileAttachment',
-          name: file.originalname,
-          contentType: file.mimetype,
-          contentBytes: file.buffer.toString('base64'),
+  // ✅ STEP 1: Upload to OneDrive
+  let fileUrl = null;
+
+  if (file) {
+    const uploadResponse = await fetch(
+      `https://graph.microsoft.com/v1.0/me/drive/root:/SwarmResults/${Date.now()}-${file.originalname}:/content`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': file.mimetype || 'application/octet-stream', // safer than file.mimetype
         },
-      ]
-    : [];
+        body: file.buffer,
+      }
+    );
 
+    const result = await uploadResponse.json();
+
+    if (!uploadResponse.ok) {
+      console.error("Upload failed:", result);
+      return res.status(500).json({ error: result.error?.message });
+    }
+
+    fileUrl = result.webUrl;
+    console.log("Uploaded to OneDrive:", fileUrl);
+  }
+
+  // ✅ STEP 2: Send email (with link instead of attachment)
   const message = {
     message: {
       subject,
       body: {
-        contentType: html ? 'HTML' : 'Text',
-        content: html || text,
+        contentType: 'Text',
+        content: `${text}\n\nFile uploaded here: ${fileUrl || 'No file uploaded'}`,
       },
       toRecipients: [{ emailAddress: { address: to } }],
-      attachments,
     },
     saveToSentItems: true,
   };
@@ -255,11 +271,14 @@ console.log("FILE:", req.file);
   );
 
   if (response.status === 202) {
-    res.json({ success: true });
+    res.json({ success: true, fileUrl });
   } else {
     const error = await response.json();
+    console.error("Mail error:", error);
     res.status(500).json({ error: error.error?.message });
   }
 });
+
+
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
