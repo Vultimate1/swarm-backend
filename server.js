@@ -88,6 +88,22 @@ app.get('/', (req, res) => {
   res.send('Backend is running');
 });
 
+app.get('/test-token', async (req, res) => {
+  try {
+    const accessToken = await getAccessToken();
+    
+    // Check what permissions this token actually has
+    const response = await fetch('https://graph.microsoft.com/v1.0/users', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    
+    const data = await response.json();
+    res.json({ tokenAcquired: true, graphResponse: data });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
 app.post('/send-email', async (req, res) => {
   const { to, subject, text, html } = req.body;
   if (!to || !subject || (!text && !html)) {
