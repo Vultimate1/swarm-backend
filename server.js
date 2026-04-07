@@ -257,8 +257,9 @@ if (folderData.value && folderData.value.length > 0) {
 }
 
 // 2. Upload file into folder
+const fileName = `${Date.now()}-${file.originalname}`;
 const uploadFile = await fetch(
-  `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${Date.now()}-${file.originalname}/content`,
+  `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${fileName}/content`,
   {
     method: "PUT",
     headers: {
@@ -269,8 +270,15 @@ const uploadFile = await fetch(
   }
 );
 const fileResult = await uploadFile.json();
-console.log("Uploaded file:", fileResult.webUrl);
+if (!uploadFile.ok) {
+  const errorData = await uploadFile.json();
+  console.error("Upload failed:", errorData);
+  return res.status(500).json({ error: errorData.error?.message || "Upload failed" });
+}
+const fileResult = await uploadFile.json();
 const fileUrl = fileResult.webUrl;
+console.log("Uploaded file URL:", fileUrl);
+console.log("Uploaded file:", fileResult.webUrl);
 
   // ✅ STEP 2: Send email (with link instead of attachment)
   const message = {
