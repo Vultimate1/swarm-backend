@@ -207,10 +207,9 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     const accessToken = await getAccessToken();
     if (!accessToken) return res.status(401).json({ error: 'Not authenticated' });
 
-    let { to, subject, text } = req.body;
+    let { to, subject, text, html } = req.body;
     const file = req.file;
 
-    // Use default email if "to" is missing
     to = (to || OUTLOOK_EMAIL || "").trim();
     if (!to || !to.includes("@")) return res.status(400).json({ error: 'Invalid recipient' });
 
@@ -219,12 +218,12 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
 
     let fileUrl = '';
 
-    // -------- Upload to OneDrive if file exists --------
+    // -------- Upload file to OneDrive --------
     if (file) {
       const folderName = 'SwarmResults';
       let folderId;
 
-      // 1️⃣ Check if folder exists
+      // Check for existing folder
       const folderResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root/children`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
@@ -232,21 +231,16 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
       const existingFolder = folderData.value.find(f => f.name === folderName && f.folder);
       if (existingFolder) folderId = existingFolder.id;
       else {
-        // Create folder
         const createResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root/children`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: folderName,
-            folder: {},
-            "@microsoft.graph.conflictBehavior": "rename"
-          })
+          body: JSON.stringify({ name: folderName, folder: {}, "@microsoft.graph.conflictBehavior": "rename" })
         });
         const newFolder = await createResp.json();
         folderId = newFolder.id;
       }
 
-      // 2️⃣ Upload file to the folder
+      // Upload the file
       const fileName = `${Date.now()}-${file.originalname}`;
       const uploadResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${folderId}:/${fileName}:/content`, {
         method: 'PUT',
@@ -267,29 +261,38 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
       fileUrl = fileResult.webUrl || '';
     }
 
-    // -------- Prepare email with OneDrive link --------
+    // -------- Prepare email attachment --------
+    const attachments = file ? [
+      {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: file.originalname,
+        contentType: file.mimetype,
+        contentBytes: file.buffer.toString('base64'),
+      }
+    ] : [];
+
+    // -------- Prepare email message --------
     const emailMessage = {
       message: {
         subject,
         body: {
-          contentType: 'Text',
-          content: text + (fileUrl ? `\n\nFile uploaded to OneDrive: ${fileUrl}` : '')
+          contentType: html ? 'HTML' : 'Text',
+          content: (html || text) + (fileUrl ? `\n\nFile also uploaded to OneDrive: ${fileUrl}` : '')
         },
-        toRecipients: [{ emailAddress: { address: to } }]
+        toRecipients: [{ emailAddress: { address: to } }],
+        attachments,
       },
       saveToSentItems: true
     };
 
+    // -------- Send the email --------
     const emailResp = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(emailMessage)
     });
 
-    if (emailResp.status === 202) {
-      return res.json({ success: true, fileUrl });
-    }
-
+    if (emailResp.status === 202) return res.json({ success: true, fileUrl });
     const errData = await emailResp.json();
     return res.status(500).json({ error: errData.error?.message || 'Email send failed' });
 
@@ -298,5 +301,6 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
