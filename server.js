@@ -210,14 +210,16 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     let { to, subject, text, html } = req.body;
     const file = req.file;
 
-    // ✅ Validate recipient
+    // ✅ Use default email if "to" is missing
     to = (to || OUTLOOK_EMAIL || "").trim();
     if (!to || !to.includes("@")) {
       return res.status(400).json({ error: "Invalid recipient email" });
     }
 
-    // ✅ Ensure subject and body are strings
+    // ✅ Prepare subject and body
     subject = (subject || "No Subject").toString();
+    const bodyContent = (html && html.trim()) || (text && text.trim()) || "No content";
+    const contentType = (html && html.trim()) ? 'HTML' : 'Text';
 
     let fileUrl = "";
 
@@ -254,7 +256,8 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
         );
         const newFolder = await createFolder.json();
         if (!createFolder.ok) {
-          console.error("Folder creation failed:", await createFolder.text());
+          const errText = await createFolder.text();
+          console.error("Folder creation failed:", errText);
           return res.status(500).json({ error: "Folder creation failed" });
         }
         folderId = newFolder.id;
@@ -276,30 +279,28 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
 
       if (!uploadFile.ok) {
         const errorText = await uploadFile.text();
-        console.error("Upload failed:", errorText);
+        console.error("File upload failed:", errorText);
         return res.status(500).json({ error: errorText });
       }
+
       const fileResult = await uploadFile.json();
       fileUrl = fileResult.webUrl || "";
     }
 
-    // ✅ Build email payload
-const bodyContent = (html && html.trim()) || (text && text.trim()) || "No content";
-const contentType = (html && html.trim()) ? 'HTML' : 'Text';
+    // ✅ Construct email payload
+    const emailMessage = {
+      message: {
+        subject,
+        body: {
+          contentType,
+          content: `${bodyContent}${fileUrl ? `\n\nFile uploaded here: ${fileUrl}` : ""}`,
+        },
+        toRecipients: [{ emailAddress: { address: to } }],
+      },
+      saveToSentItems: true,
+    };
 
-const message = {
-  message: {
-    subject: (subject || "No Subject").toString(),
-    body: {
-      contentType,
-      content: `${bodyContent}${fileUrl ? `\n\nFile uploaded here: ${fileUrl}` : ""}`,
-    },
-    toRecipients: [{ emailAddress: { address: to } }],
-  },
-  saveToSentItems: true,
-};
-
-    console.log("Sending email payload:", JSON.stringify(message, null, 2));
+    console.log("Sending email payload:", JSON.stringify(emailMessage, null, 2));
 
     // ✅ Send email
     const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
@@ -308,21 +309,21 @@ const message = {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(message),
+      body: JSON.stringify(emailMessage),
     });
 
     if (response.status === 202) {
-      res.json({ success: true, fileUrl });
+      return res.json({ success: true, fileUrl });
     } else {
       const errorData = await response.json();
       console.error("Mail error:", errorData);
-      res.status(500).json({ error: errorData.error?.message || "Email send failed" });
+      return res.status(500).json({ error: errorData.error?.message || "Email send failed" });
     }
+
   } catch (err) {
     console.error("Send email exception:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
-
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
