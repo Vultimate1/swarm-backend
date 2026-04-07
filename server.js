@@ -144,7 +144,7 @@ app.get('/auth', (req, res) => {
     client_id: CLIENT_ID,
     response_type: 'code',
     redirect_uri: REDIRECT_URI,
-    scope: 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Files.ReadWrite offline_access',
+    scope: 'https://graph.microsoft.com/Mail.Send offline_access',
     response_mode: 'query',
   });
 
@@ -167,7 +167,7 @@ app.get('/auth/callback', async (req, res) => {
     code,
     redirect_uri: REDIRECT_URI,
     grant_type: 'authorization_code',
-    scope: 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Files.ReadWrite offline_access'
+    scope: 'https://graph.microsoft.com/Mail.Send offline_access',
   });
 
   try {
@@ -203,98 +203,62 @@ app.get('/auth/status', async (req, res) => {
 });
 
 app.post('/send-email', upload.single('file'), async (req, res) => {
-  try {
-    const accessToken = await getAccessToken();
-    if (!accessToken) return res.status(401).json({ error: 'Not authenticated' });
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
 
-    // ⚡ For FormData fields, multer puts them in req.body
-    let to = req.body.to || OUTLOOK_EMAIL;
-    let subject = req.body.subject || "No Subject";
-    let text = req.body.text || "";
-    let html = req.body.html || "";
-    const file = req.file;
+  const { to, subject, text, html } = req.body;
+  const file = req.file;
 
-    to = to.trim();
-    if (!to.includes("@")) return res.status(400).json({ error: "Invalid recipient email" });
+  if (!to || !subject || (!text && !html)) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
 
-    let fileUrl = "";
+console.log("BODY:", req.body);
+console.log("FILE:", req.file);
 
-    // Upload file to OneDrive if present (same logic as before)
-    if (file) {
-      const folderName = "SwarmResults";
-      let folderId = null;
-
-      const folderCheck = await fetch(
-        `https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq '${folderName}' and folder ne null`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      const folderData = await folderCheck.json();
-      if (folderData.value && folderData.value.length > 0) folderId = folderData.value[0].id;
-      else {
-        const createFolder = await fetch(
-          `https://graph.microsoft.com/v1.0/me/drive/root/children`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ name: folderName, folder: {}, "@microsoft.graph.conflictBehavior": "rename" }),
-          }
-        );
-        const newFolder = await createFolder.json();
-        if (!createFolder.ok) return res.status(500).json({ error: "Folder creation failed" });
-        folderId = newFolder.id;
-      }
-
-      const fileName = `${Date.now()}-${encodeURIComponent(file.originalname)}`;
-      const uploadFile = await fetch(
-        `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${fileName}/content`,
+  const attachments = file
+    ? [
         {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": file.mimetype || "application/octet-stream",
-          },
-          body: file.buffer,
-        }
-      );
-      if (!uploadFile.ok) return res.status(500).json({ error: await uploadFile.text() });
-      const fileResult = await uploadFile.json();
-      fileUrl = fileResult.webUrl || "";
-    }
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: file.originalname,
+          contentType: file.mimetype,
+          contentBytes: file.buffer.toString('base64'),
+        },
+      ]
+    : [];
 
-    // Construct email payload
-    const emailBody = `${text}${fileUrl ? `\n\nFile uploaded here: ${fileUrl}` : ""}`;
-    const contentType = html.trim() ? "HTML" : "Text";
-
-    const emailMessage = {
-      message: {
-        subject,
-        body: { contentType, content: html.trim() || emailBody },
-        toRecipients: [{ emailAddress: { address: to } }],
+  const message = {
+    message: {
+      subject,
+      body: {
+        contentType: html ? 'HTML' : 'Text',
+        content: html || text,
       },
-      saveToSentItems: true,
-    };
+      toRecipients: [{ emailAddress: { address: to } }],
+      attachments,
+    },
+    saveToSentItems: true,
+  };
 
-    const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+  const response = await fetch(
+    'https://graph.microsoft.com/v1.0/me/sendMail',
+    {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(emailMessage),
-    });
+      body: JSON.stringify(message),
+    }
+  );
 
-    if (response.status === 202) return res.json({ success: true, fileUrl });
-
-    const errorData = await response.json();
-    console.error("Mail error:", errorData);
-    return res.status(500).json({ error: errorData.error?.message || "Email send failed" });
-
-  } catch (err) {
-    console.error("Send email exception:", err);
-    return res.status(500).json({ error: err.message });
+  if (response.status === 202) {
+    res.json({ success: true });
+  } else {
+    const error = await response.json();
+    res.status(500).json({ error: error.error?.message });
   }
 });
 
