@@ -207,24 +207,23 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     const accessToken = await getAccessToken();
     if (!accessToken) return res.status(401).json({ error: 'Not authenticated' });
 
-    let { to, subject, text, html } = req.body;
+    // ⚡ For FormData fields, multer puts them in req.body
+    let to = req.body.to || OUTLOOK_EMAIL;
+    let subject = req.body.subject || "No Subject";
+    let text = req.body.text || "";
+    let html = req.body.html || "";
     const file = req.file;
 
-    // Use default email if "to" is missing
-    to = (to || OUTLOOK_EMAIL || "").trim();
-    if (!to || !to.includes("@")) {
-      return res.status(400).json({ error: "Invalid recipient email" });
-    }
+    to = to.trim();
+    if (!to.includes("@")) return res.status(400).json({ error: "Invalid recipient email" });
 
-    subject = (subject || "No Subject").toString();
-
-    // Upload file to OneDrive if present
     let fileUrl = "";
+
+    // Upload file to OneDrive if present (same logic as before)
     if (file) {
       const folderName = "SwarmResults";
       let folderId = null;
 
-      // Check or create folder
       const folderCheck = await fetch(
         `https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq '${folderName}' and folder ne null`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -265,22 +264,18 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
       fileUrl = fileResult.webUrl || "";
     }
 
-    // Build email content
-    const emailBody = `${text?.trim() || "No content provided"}${fileUrl ? `\n\nFile uploaded here: ${fileUrl}` : ""}`;
-    const contentType = html?.trim() ? "HTML" : "Text";
+    // Construct email payload
+    const emailBody = `${text}${fileUrl ? `\n\nFile uploaded here: ${fileUrl}` : ""}`;
+    const contentType = html.trim() ? "HTML" : "Text";
+
     const emailMessage = {
       message: {
         subject,
-        body: {
-          contentType,
-          content: html?.trim() || emailBody,
-        },
+        body: { contentType, content: html.trim() || emailBody },
         toRecipients: [{ emailAddress: { address: to } }],
       },
       saveToSentItems: true,
     };
-
-    console.log("Sending email payload:", JSON.stringify(emailMessage, null, 2));
 
     const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
       method: 'POST',
@@ -292,6 +287,7 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     });
 
     if (response.status === 202) return res.json({ success: true, fileUrl });
+
     const errorData = await response.json();
     console.error("Mail error:", errorData);
     return res.status(500).json({ error: errorData.error?.message || "Email send failed" });
