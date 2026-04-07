@@ -121,11 +121,11 @@ app.get('/auth', async (req, res) => {
       scopes: ['Mail.Send', 'offline_access'],
       redirectUri: REDIRECT_URI,
     });
-    console.log('Redirecting to:', url);
+    console.log('Auth URL:', url); // check Render logs for this
     res.redirect(url);
   } catch (err) {
     console.error('Auth URL error:', err);
-    res.status(500).send('Failed to generate auth URL: ' + err.message);
+    res.status(500).send('Failed: ' + err.message);
   }
 });
 
