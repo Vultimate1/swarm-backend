@@ -292,7 +292,7 @@ if (!uploadFile.ok) {
         contentType: 'Text',
         content: `${text}\n\nFile uploaded here: ${fileUrl || 'No file uploaded'}`,
       },
-      toRecipients: [{ emailAddress: { address: to } }],
+      toRecipients: [{ emailAddress: { address: to || OUTLOOK_EMAIL } }],
     },
     saveToSentItems: true,
   };
