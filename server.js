@@ -78,6 +78,11 @@ const msalClient = new ConfidentialClientApplication({
   },
 });
 
+// Store token in memory
+let cachedToken = null;
+
+app.get('/', (req, res) => res.send('Backend is running'));
+
 async function getAccessToken() {
   const result = await msalClient.acquireTokenByClientCredential({
     scopes: ['https://graph.microsoft.com/.default'],
