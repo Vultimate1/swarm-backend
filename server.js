@@ -217,14 +217,12 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     console.log("BODY:", req.body);
     console.log("FILE:", req.file);
 
+    // ✅ Step 1: Upload to OneDrive if file exists
     let fileUrl = "";
-
-    // ✅ Upload file to OneDrive if present
     if (file) {
       const folderName = "SwarmResults";
       let folderId = null;
 
-      // Check if folder exists
       const folderCheck = await fetch(
         `https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq '${folderName}' and folder ne null`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -233,7 +231,6 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
       if (folderData.value && folderData.value.length > 0) {
         folderId = folderData.value[0].id;
       } else {
-        // Create folder
         const createFolder = await fetch(
           `https://graph.microsoft.com/v1.0/me/drive/root/children`,
           {
@@ -273,14 +270,14 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
       );
       if (!uploadFile.ok) {
         const errorText = await uploadFile.text();
-        console.error("Upload failed:", errorText);
+        console.error("File upload failed:", errorText);
         return res.status(500).json({ error: errorText });
       }
       const fileResult = await uploadFile.json();
       fileUrl = fileResult.webUrl || "";
     }
 
-    // ✅ Prepare attachment (as before)
+    // ✅ Step 2: Send email with attachment
     const attachments = file
       ? [
           {
@@ -292,7 +289,6 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
         ]
       : [];
 
-    // ✅ Construct email message
     const emailMessage = {
       message: {
         subject,
@@ -308,7 +304,6 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
 
     console.log("Sending email payload:", JSON.stringify(emailMessage, null, 2));
 
-    // ✅ Send email
     const response = await fetch(
       'https://graph.microsoft.com/v1.0/me/sendMail',
       {
