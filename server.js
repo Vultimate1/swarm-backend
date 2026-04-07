@@ -221,28 +221,33 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
  
 if (file) {
   const folderName = 'SwarmResults';
-  let folderId = null;
+  let folderId;
 
-  // 1️⃣ Check if folder exists
-  const folderResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq '${folderName}' and folder ne null`, {
+  // 1️⃣ Find folder
+  const folderResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root/children`, {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
   const folderData = await folderResp.json();
-  if (folderData.value && folderData.value.length > 0) folderId = folderData.value[0].id;
+  const existingFolder = folderData.value.find(f => f.name === folderName && f.folder);
+  if (existingFolder) folderId = existingFolder.id;
   else {
-    // create folder
+    // Create folder
     const createResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root/children`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: folderName, folder: {}, "@microsoft.graph.conflictBehavior": "rename" })
+      body: JSON.stringify({
+        name: folderName,
+        folder: {},
+        "@microsoft.graph.conflictBehavior": "rename"
+      })
     });
     const newFolder = await createResp.json();
     folderId = newFolder.id;
   }
 
-  // 2️⃣ Upload file
+  // 2️⃣ Upload file using the /content endpoint
   const fileName = `${Date.now()}-${file.originalname}`;
-  const uploadResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${fileName}/content`, {
+  const uploadResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${folderId}:/${fileName}:/content`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': file.mimetype || 'application/octet-stream' },
     body: file.buffer
