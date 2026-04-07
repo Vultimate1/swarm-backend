@@ -59,6 +59,8 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
+const upload = multer();
 
 const app = express();
 app.use(cors());
@@ -200,54 +202,63 @@ app.get('/auth/status', async (req, res) => {
   res.json({ authenticated: !!token });
 });
 
-app.post('/send-email', async (req, res) => {
+app.post('/send-email', upload.single('file'), async (req, res) => {
   const accessToken = await getAccessToken();
   if (!accessToken) {
-    return res.status(401).json({
-      error: 'Not authenticated. Visit https://swarm-backend-ga0y.onrender.com/auth to login.',
-    });
+    return res.status(401).json({ error: 'Not authenticated' });
   }
 
   const { to, subject, text, html } = req.body;
+  const file = req.file;
+
   if (!to || !subject || (!text && !html)) {
-    return res.status(400).json({ error: 'Missing required fields: to, subject, text/html' });
+    return res.status(400).json({ error: 'Missing fields' });
   }
 
-  try {
-    const message = {
-      message: {
-        subject,
-        body: {
-          contentType: html ? 'HTML' : 'Text',
-          content: html || text,
+console.log("BODY:", req.body);
+console.log("FILE:", req.file);
+
+  const attachments = file
+    ? [
+        {
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: file.originalname,
+          contentType: file.mimetype,
+          contentBytes: file.buffer.toString('base64'),
         },
-        toRecipients: [{ emailAddress: { address: to } }],
+      ]
+    : [];
+
+  const message = {
+    message: {
+      subject,
+      body: {
+        contentType: html ? 'HTML' : 'Text',
+        content: html || text,
       },
-      saveToSentItems: true,
-    };
+      toRecipients: [{ emailAddress: { address: to } }],
+      attachments,
+    },
+    saveToSentItems: true,
+  };
 
-    const response = await fetch(
-      'https://graph.microsoft.com/v1.0/me/sendMail',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(message),
-      }
-    );
-
-    if (response.status === 202) {
-      res.json({ success: true });
-    } else {
-      const error = await response.json();
-      console.error('Graph API error:', error);
-      res.status(500).json({ error: error.error?.message });
+  const response = await fetch(
+    'https://graph.microsoft.com/v1.0/me/sendMail',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message),
     }
-  } catch (error) {
-    console.error('Error sending email:', error);
-    res.status(500).json({ error: error.message });
+  );
+
+  if (response.status === 202) {
+    res.json({ success: true });
+  } else {
+    const error = await response.json();
+    res.status(500).json({ error: error.error?.message });
   }
 });
 
