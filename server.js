@@ -219,55 +219,58 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
   console.log("FILE:", req.file);
 
   // ✅ STEP 1: Upload to OneDrive
-  let fileUrl = null;
+// 1. Ensure folder exists or create it
+const folderName = "SwarmResults";
 
-  if (file) {
+let folderId = null;
 
-const folderName = 'SwarmResults';
-
-// Create or get folder
-const folderResponse = await fetch(
-  `https://graph.microsoft.com/v1.0/me/drive/root/children`,
+// Try to get folder first
+const folderCheck = await fetch(
+  `https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq '${folderName}' and folder ne null`,
   {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: folderName,
-      folder: {}, // tells Graph API this is a folder
-      '@microsoft.graph.conflictBehavior': 'rename' // avoids conflicts
-    }),
+    headers: { Authorization: `Bearer ${accessToken}` },
   }
 );
+const folderData = await folderCheck.json();
 
-const folderData = await folderResponse.json();
-const folderId = folderData.id;
-
-    const uploadResponse = await fetch(
-      `https://graph.microsoft.com/v1.0/me/drive/root:/SwarmResults/${Date.now()}-${file.originalname}:/content`,
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': file.mimetype || 'application/octet-stream', // safer than file.mimetype
-        },
-        body: file.buffer,
-      }
-    );
-
-    const result = await uploadResponse.json();
-    console.log('Uploaded file URL:', result.webUrl);
-
-    if (!uploadResponse.ok) {
-      console.error("Upload failed:", result);
-      return res.status(500).json({ error: result.error?.message });
+if (folderData.value && folderData.value.length > 0) {
+  folderId = folderData.value[0].id;
+} else {
+  // Folder doesn't exist → create it
+  const createFolder = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/root/children`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: folderName,
+        folder: {},
+        "@microsoft.graph.conflictBehavior": "rename",
+      }),
     }
+  );
+  const newFolder = await createFolder.json();
+  folderId = newFolder.id;
+}
 
-    fileUrl = result.webUrl;
-    console.log("Uploaded to OneDrive:", fileUrl);
+// 2. Upload file into folder
+const uploadFile = await fetch(
+  `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${Date.now()}-${file.originalname}/content`,
+  {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": file.mimetype || "application/octet-stream",
+    },
+    body: file.buffer,
   }
+);
+const fileResult = await uploadFile.json();
+console.log("Uploaded file:", fileResult.webUrl);
+const fileUrl = fileResult.webUrl;
 
   // ✅ STEP 2: Send email (with link instead of attachment)
   const message = {
