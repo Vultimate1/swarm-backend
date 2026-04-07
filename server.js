@@ -115,12 +115,18 @@ async function getAccessToken() {
 
 app.get('/', (req, res) => res.send('Backend is running'));
 
-app.get('/auth', (req, res) => {
-  const authUrl = msalClient.getAuthCodeUrl({
-    scopes: ['Mail.Send'],
-    redirectUrl: REDIRECT_URI,
-  });
-  authUrl.then(url => res.redirect(url));
+app.get('/auth', async (req, res) => {
+  try {
+    const url = await msalClient.getAuthCodeUrl({
+      scopes: ['Mail.Send', 'offline_access'],
+      redirectUri: REDIRECT_URI,
+    });
+    console.log('Redirecting to:', url);
+    res.redirect(url);
+  } catch (err) {
+    console.error('Auth URL error:', err);
+    res.status(500).send('Failed to generate auth URL: ' + err.message);
+  }
 });
 
 app.get('/auth/callback', async (req, res) => {
