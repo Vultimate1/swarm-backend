@@ -68,6 +68,7 @@ const CLIENT_ID = process.env.AZURE_CLIENT_ID;
 const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 const TENANT_ID = process.env.AZURE_TENANT_ID;
 const OUTLOOK_EMAIL = process.env.OUTLOOK_EMAIL;
+const REDIRECT_URI = 'https://swarm-backend-ga0y.onrender.com/auth/callback';
 
 const msalClient = new ConfidentialClientApplication({
   auth: {
@@ -84,35 +85,40 @@ async function getAccessToken() {
   return result.accessToken;
 }
 
-app.get('/', (req, res) => {
-  res.send('Backend is running');
+app.get('/auth', (req, res) => {
+  const authUrl = msalClient.getAuthCodeUrl({
+    scopes: ['Mail.Send'],
+    redirectUrl: REDIRECT_URI,
+  });
+  authUrl.then(url => res.redirect(url));
 });
 
-app.get('/test-token', async (req, res) => {
+app.get('/auth/callback', async (req, res) => {
+  const {code} = req.query;
   try {
-    const accessToken = await getAccessToken();
-    
-    // Check what permissions this token actually has
-    const response = await fetch('https://graph.microsoft.com/v1.0/users', {
-      headers: { Authorization: `Bearer ${accessToken}` }
+    const result = await msalClient.acquireTokenByCode({
+      scopes: ['Mail.Send'],
+      redirectUrl: REDIRECT_URI,
     });
-    
-    const data = await response.json();
-    res.json({ tokenAcquired: true, graphResponse: data });
+    cachedToken = result.accessToken;
+    res.send('Auth successful! You can now send emails.');
   } catch (err) {
-    res.json({ error: err.message });
+    console.error('Auth error:', err);
+    res.status(500).send('Auth failed: ' + err.message);
   }
 });
 
 app.post('/send-email', async (req, res) => {
+  if (!cachedToken) {
+    return res.status(401).json({ error: 'Not authenticated. Visit /auth first.' });
+  }
+
   const { to, subject, text, html } = req.body;
   if (!to || !subject || (!text && !html)) {
-    return res.status(400).json({ error: 'Missing required fields: to, subject, text/html' });
+    return res.status(400).json({ error: 'Missing required fields' });
   }
 
   try {
-    const accessToken = await getAccessToken();
-
     const message = {
       message: {
         subject,
@@ -120,11 +126,7 @@ app.post('/send-email', async (req, res) => {
           contentType: html ? 'HTML' : 'Text',
           content: html || text,
         },
-        toRecipients: [
-          {
-            emailAddress: { address: to },
-          },
-        ],
+        toRecipients: [{ emailAddress: { address: to } }],
       },
       saveToSentItems: true,
     };
@@ -134,7 +136,7 @@ app.post('/send-email', async (req, res) => {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${cachedToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(message),
@@ -145,11 +147,9 @@ app.post('/send-email', async (req, res) => {
       res.json({ success: true });
     } else {
       const error = await response.json();
-      console.error('Graph API error:', error);
-      res.status(500).json({ error: error.error?.message || 'Failed to send email' });
+      res.status(500).json({ error: error.error?.message });
     }
   } catch (error) {
-    console.error('Error sending email:', error);
     res.status(500).json({ error: error.message });
   }
 });
