@@ -202,6 +202,85 @@ app.get('/auth/status', async (req, res) => {
   res.json({ authenticated: !!token });
 });
 
+
+
+const ONEDRIVE_FOLDER = 'UploadedFiles'; // Change this to your desired folder name
+
+// Helper: ensure OneDrive folder exists, create if not, return folder ID
+async function ensureOneDriveFolder(accessToken, folderName) {
+  const checkRes = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/root:/${folderName}`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+
+  if (checkRes.ok) {
+    const folder = await checkRes.json();
+    console.log(`OneDrive folder "${folderName}" already exists (id: ${folder.id})`);
+    return folder.id;
+  }
+
+  if (checkRes.status === 404) {
+    console.log(`OneDrive folder "${folderName}" not found, creating...`);
+    const createRes = await fetch(
+      'https://graph.microsoft.com/v1.0/me/drive/root/children',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: folderName,
+          folder: {},
+          '@microsoft.graph.conflictBehavior': 'rename',
+        }),
+      }
+    );
+
+    if (!createRes.ok) {
+      const err = await createRes.json();
+      throw new Error(`Failed to create OneDrive folder: ${err.error?.message}`);
+    }
+
+    const newFolder = await createRes.json();
+    console.log(`Created OneDrive folder "${folderName}" (id: ${newFolder.id})`);
+    return newFolder.id;
+  }
+
+  const err = await checkRes.json();
+  throw new Error(`OneDrive folder check failed: ${err.error?.message}`);
+}
+
+// Helper: upload file to OneDrive folder
+async function uploadToOneDrive(accessToken, folderName, file) {
+  await ensureOneDriveFolder(accessToken, folderName);
+
+  const encodedName = encodeURIComponent(file.originalname);
+  const uploadRes = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/root:/${folderName}/${encodedName}:/content`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': file.mimetype || 'application/octet-stream',
+      },
+      body: file.buffer,
+    }
+  );
+
+  if (!uploadRes.ok) {
+    const err = await uploadRes.json();
+    throw new Error(`OneDrive upload failed: ${err.error?.message}`);
+  }
+
+  const uploaded = await uploadRes.json();
+  console.log(`Uploaded "${file.originalname}" to OneDrive folder "${folderName}"`);
+  return uploaded;
+}
+
+
 app.post('/send-email', upload.single('file'), async (req, res) => {
   const accessToken = await getAccessToken();
   if (!accessToken) {
@@ -217,6 +296,16 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
 
   console.log("BODY:", req.body);
   console.log("FILE:", req.file);
+
+  // Upload to OneDrive if a file was provided
+  if (file) {
+    try {
+      await uploadToOneDrive(accessToken, ONEDRIVE_FOLDER, file);
+    } catch (err) {
+      console.error('OneDrive upload error:', err.message);
+      return res.status(500).json({ error: `OneDrive upload failed: ${err.message}` });
+    }
+  }
 
   const attachments = file
     ? [
@@ -261,5 +350,6 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     res.status(500).json({ error: error.error?.message });
   }
 });
+
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
