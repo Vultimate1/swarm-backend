@@ -221,6 +221,29 @@ async function getDriveRoot(accessToken) {
 }
 
 async function ensureOneDriveFolder(accessToken, folderName) {
+  // First check sharedWithMe
+  const sharedRes = await fetch(
+    'https://graph.microsoft.com/v1.0/me/drive/sharedWithMe',
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+
+  if (sharedRes.ok) {
+    const { value: sharedItems } = await sharedRes.json();
+    const target = sharedItems.find(
+      item => item.name.toLowerCase() === folderName.toLowerCase() && item.folder
+    );
+
+    if (target) {
+      console.log(`Found "${folderName}" in sharedWithMe, using remote drive`);
+      return {
+        driveId: target.remoteItem.parentReference.driveId,
+        folderId: target.remoteItem.id,
+      };
+    }
+  }
+
+  // Fallback: use personal drive
+  console.log(`"${folderName}" not found in sharedWithMe, falling back to personal drive`);
   const listRes = await fetch(
     'https://graph.microsoft.com/v1.0/me/drive/root/children',
     { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -237,11 +260,15 @@ async function ensureOneDriveFolder(accessToken, folderName) {
   );
 
   if (existing) {
-    console.log(`Found folder "${folderName}" with ID: ${existing.id}`);
-    return existing.id;
+    console.log(`Found folder "${folderName}" in personal drive with ID: ${existing.id}`);
+    return {
+      driveId: 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6',
+      folderId: existing.id,
+    };
   }
 
-  console.log(`Folder "${folderName}" not found, creating...`);
+  // Create it in personal drive if it doesn't exist anywhere
+  console.log(`Folder "${folderName}" not found anywhere, creating in personal drive...`);
   const createRes = await fetch(
     'https://graph.microsoft.com/v1.0/me/drive/root/children',
     {
@@ -265,16 +292,17 @@ async function ensureOneDriveFolder(accessToken, folderName) {
 
   const newFolder = await createRes.json();
   console.log(`Created folder "${folderName}" with ID: ${newFolder.id}`);
-  return newFolder.id;
+  return {
+    driveId: 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6',
+    folderId: newFolder.id,
+  };
 }
 
 async function uploadToOneDrive(accessToken, folderName, file) {
-  const driveId = 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6';
-  const folderId = '015USV6Y7VRP2HO242BVGIJ4AJHPSXEDOJ'; // SwarmResults folder ID
+  const { driveId, folderId } = await ensureOneDriveFolder(accessToken, folderName);
 
-  // SharePoint disallows: " * : < > ? / \ |
   const safeName = file.originalname.replace(/[":*<>?/\\|]/g, '-');
-  console.log(`Safe filename: "${safeName}"`);
+  console.log(`Uploading "${safeName}" to drive ${driveId}, folder ${folderId}`);
 
   const sessionRes = await fetch(
     `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/${encodeURIComponent(safeName)}:/createUploadSession`,
@@ -299,7 +327,6 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   }
 
   const { uploadUrl } = await sessionRes.json();
-  console.log('Upload session created, uploading bytes...');
 
   const fileBuffer = file.buffer;
   const fileSize = fileBuffer.length;
@@ -444,6 +471,69 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     res.status(500).json({ error: error.error?.message });
   }
 });
+
+
+/* EMAIL-ONLY POST RESPONSE
+app.post('/send-email', upload.single('file'), async (req, res) => {
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  const { to, subject, text, html } = req.body;
+  const file = req.file;
+
+  if (!to || !subject || (!text && !html)) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
+
+  console.log("BODY:", req.body);
+  console.log("FILE:", req.file);
+
+  const attachments = file
+    ? [
+        {
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: file.originalname,
+          contentType: file.mimetype,
+          contentBytes: file.buffer.toString('base64'),
+        },
+      ]
+    : [];
+
+  const message = {
+    message: {
+      subject,
+      body: {
+        contentType: html ? 'HTML' : 'Text',
+        content: html || text,
+      },
+      toRecipients: [{ emailAddress: { address: to } }],
+      attachments,
+    },
+    saveToSentItems: true,
+  };
+
+  const response = await fetch(
+    'https://graph.microsoft.com/v1.0/me/sendMail',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message),
+    }
+  );
+
+  if (response.status === 202) {
+    res.json({ success: true });
+  } else {
+    const error = await response.json();
+    res.status(500).json({ error: error.error?.message });
+  }
+});
+*/
 
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
