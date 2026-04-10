@@ -296,6 +296,39 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   return uploaded;
 }
 
+app.get('/debug/drive', async (req, res) => {
+  const accessToken = await getAccessToken();
+  if (!accessToken) return res.status(401).json({ error: 'Not authenticated' });
+
+  try {
+    // Test 1: basic drive info
+    const driveRes = await fetch('https://graph.microsoft.com/v1.0/me/drive', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const driveData = await driveRes.json();
+
+    // Test 2: list root children
+    const rootRes = await fetch('https://graph.microsoft.com/v1.0/me/drive/root/children', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const rootData = await rootRes.json();
+
+    // Test 3: try drives list
+    const drivesRes = await fetch('https://graph.microsoft.com/v1.0/me/drives', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const drivesData = await drivesRes.json();
+
+    res.json({
+      driveEndpoint: { status: driveRes.status, body: driveData },
+      rootChildren: { status: rootRes.status, body: rootData },
+      drivesList: { status: drivesRes.status, body: drivesData },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/send-email', upload.single('file'), async (req, res) => {
   const accessToken = await getAccessToken();
   if (!accessToken) {
