@@ -221,29 +221,38 @@ async function getDriveRoot(accessToken) {
 }
 
 async function ensureOneDriveFolder(accessToken, folderName) {
-  // First check sharedWithMe
-  const sharedRes = await fetch(
-    'https://graph.microsoft.com/v1.0/me/drive/sharedWithMe',
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
+  // First try the specific shared link
+  const sharedUrl = 'https://studentuml-my.sharepoint.com/:f:/r/personal/kshitij_jerath_uml_edu/Documents/Exalabs_main/Sriram/Webpage%20Files?csf=1&web=1&e=HDgy7W';
+  
+  try {
+    // Encode the sharing URL into a base64 token Graph can use
+    const encoded = 'u!' + Buffer.from(sharedUrl).toString('base64')
+      .replace(/=/g, '')
+      .replace(/\//g, '_')
+      .replace(/\+/g, '-');
 
-  if (sharedRes.ok) {
-    const { value: sharedItems } = await sharedRes.json();
-    const target = sharedItems.find(
-      item => item.name.toLowerCase() === folderName.toLowerCase() && item.folder
+    const sharedRes = await fetch(
+      `https://graph.microsoft.com/v1.0/shares/${encoded}/driveItem`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
-    if (target) {
-      console.log(`Found "${folderName}" in sharedWithMe, using remote drive`);
+    if (sharedRes.ok) {
+      const item = await sharedRes.json();
+      console.log(`Resolved shared link, folder ID: ${item.id}, drive ID: ${item.parentReference.driveId}`);
       return {
-        driveId: target.remoteItem.parentReference.driveId,
-        folderId: target.remoteItem.id,
+        driveId: item.parentReference.driveId,
+        folderId: item.id,
       };
+    } else {
+      const err = await sharedRes.json();
+      console.log(`Could not resolve shared link: ${err.error?.message}, falling back...`);
     }
+  } catch (err) {
+    console.log(`Shared link error: ${err.message}, falling back...`);
   }
 
-  // Fallback: use personal drive
-  console.log(`"${folderName}" not found in sharedWithMe, falling back to personal drive`);
+  // Fallback: personal drive
+  console.log(`Falling back to personal drive folder "${folderName}"`);
   const listRes = await fetch(
     'https://graph.microsoft.com/v1.0/me/drive/root/children',
     { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -260,15 +269,14 @@ async function ensureOneDriveFolder(accessToken, folderName) {
   );
 
   if (existing) {
-    console.log(`Found folder "${folderName}" in personal drive with ID: ${existing.id}`);
+    console.log(`Found folder "${folderName}" in personal drive: ${existing.id}`);
     return {
       driveId: 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6',
       folderId: existing.id,
     };
   }
 
-  // Create it in personal drive if it doesn't exist anywhere
-  console.log(`Folder "${folderName}" not found anywhere, creating in personal drive...`);
+  // Create in personal drive if not found
   const createRes = await fetch(
     'https://graph.microsoft.com/v1.0/me/drive/root/children',
     {
@@ -291,7 +299,7 @@ async function ensureOneDriveFolder(accessToken, folderName) {
   }
 
   const newFolder = await createRes.json();
-  console.log(`Created folder "${folderName}" with ID: ${newFolder.id}`);
+  console.log(`Created folder "${folderName}" in personal drive: ${newFolder.id}`);
   return {
     driveId: 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6',
     folderId: newFolder.id,
