@@ -270,12 +270,14 @@ async function ensureOneDriveFolder(accessToken, folderName) {
 
 async function uploadToOneDrive(accessToken, folderName, file) {
   const driveId = 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6';
-  const folderId = await ensureOneDriveFolder(accessToken, folderName);
+  const folderId = '015USV6Y7VRP2HO242BVGIJ4AJHPSXEDOJ'; // SwarmResults folder ID
 
-  console.log(`Creating upload session for folder ID: ${folderId}, file: ${file.originalname}`);
+  // SharePoint disallows: " * : < > ? / \ |
+  const safeName = file.originalname.replace(/[":*<>?/\\|]/g, '-');
+  console.log(`Safe filename: "${safeName}"`);
 
   const sessionRes = await fetch(
-    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/${encodeURIComponent(file.originalname)}:/createUploadSession`,
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/${encodeURIComponent(safeName)}:/createUploadSession`,
     {
       method: 'POST',
       headers: {
@@ -285,7 +287,7 @@ async function uploadToOneDrive(accessToken, folderName, file) {
       body: JSON.stringify({
         item: {
           '@microsoft.graph.conflictBehavior': 'replace',
-          name: file.originalname,
+          name: safeName,
         },
       }),
     }
@@ -318,7 +320,7 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   }
 
   const uploaded = await uploadRes.json();
-  console.log(`Uploaded "${file.originalname}" to OneDrive folder "${folderName}"`);
+  console.log(`Uploaded "${safeName}" to OneDrive folder "${folderName}"`);
   return uploaded;
 }
 
