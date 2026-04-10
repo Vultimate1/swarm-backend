@@ -272,15 +272,13 @@ async function ensureOneDriveFolder(accessToken, folderName) {
 
 async function uploadToOneDrive(accessToken, folderName, file) {
   const driveId = 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6';
-  
-  // Get the folder ID first (for verification it exists)
-  await ensureOneDriveFolder(accessToken, folderName);
+  const folderId = await ensureOneDriveFolder(accessToken, folderName);
 
-  const encodedPath = encodeURIComponent(`${folderName}/${file.originalname}`);
+  console.log(`Using folder ID: ${folderId}`);
 
-  // Create upload session using the drives/{driveId}/root:/{path}:/createUploadSession format
+  // Create upload session directly on the folder item
   const sessionRes = await fetch(
-    `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${folderName}/${encodeURIComponent(file.originalname)}:/createUploadSession`,
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/${encodeURIComponent(file.originalname)}:/createUploadSession`,
     {
       method: 'POST',
       headers: {
@@ -304,7 +302,6 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   const { uploadUrl } = await sessionRes.json();
   console.log('Upload session created successfully');
 
-  // Upload the raw bytes to the session URL
   const fileBuffer = file.buffer;
   const fileSize = fileBuffer.length;
 
@@ -360,6 +357,24 @@ app.get('/debug/drive', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+app.get('/debug/upload-session', async (req, res) => {
+  const accessToken = await getAccessToken();
+  const driveId = 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6';
+  const folderId = '015USV6YYMJSU4O7Y2TVAKQOOPBRL6Q3WE'; // UploadedFiles folder ID from debug output
+
+  const sessionRes = await fetch(
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/test.txt:/createUploadSession`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'replace', name: 'test.txt' } }),
+    }
+  );
+
+  res.json({ status: sessionRes.status, body: await sessionRes.json() });
+});
+
 
 app.post('/send-email', upload.single('file'), async (req, res) => {
   const accessToken = await getAccessToken();
