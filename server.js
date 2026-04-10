@@ -203,13 +203,29 @@ app.get('/auth/status', async (req, res) => {
 });
 
 
+const ONEDRIVE_FOLDER = 'SwarmResults';
 
-const ONEDRIVE_FOLDER = 'UploadedFiles'; // Change this to your desired folder name
+// Helper: get the user's default drive ID (works for personal + work accounts)
+async function getDriveRoot(accessToken) {
+  const res = await fetch('https://graph.microsoft.com/v1.0/me/drive', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-// Helper: ensure OneDrive folder exists, create if not, return folder ID
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(`Could not access OneDrive: ${err.error?.message}`);
+  }
+
+  const drive = await res.json();
+  return drive.id; // e.g. "b!abc123..."
+}
+
+// Helper: ensure OneDrive folder exists, create if not
 async function ensureOneDriveFolder(accessToken, folderName) {
+  const driveId = await getDriveRoot(accessToken);
+
   const checkRes = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/root:/${folderName}`,
+    `https://graph.microsoft.com/v1.0/me/drives/${driveId}/root:/${folderName}`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
     }
@@ -217,14 +233,14 @@ async function ensureOneDriveFolder(accessToken, folderName) {
 
   if (checkRes.ok) {
     const folder = await checkRes.json();
-    console.log(`OneDrive folder "${folderName}" already exists (id: ${folder.id})`);
-    return folder.id;
+    console.log(`OneDrive folder "${folderName}" exists (id: ${folder.id})`);
+    return { folderId: folder.id, driveId };
   }
 
   if (checkRes.status === 404) {
     console.log(`OneDrive folder "${folderName}" not found, creating...`);
     const createRes = await fetch(
-      'https://graph.microsoft.com/v1.0/me/drive/root/children',
+      `https://graph.microsoft.com/v1.0/me/drives/${driveId}/root/children`,
       {
         method: 'POST',
         headers: {
@@ -246,7 +262,7 @@ async function ensureOneDriveFolder(accessToken, folderName) {
 
     const newFolder = await createRes.json();
     console.log(`Created OneDrive folder "${folderName}" (id: ${newFolder.id})`);
-    return newFolder.id;
+    return { folderId: newFolder.id, driveId };
   }
 
   const err = await checkRes.json();
@@ -255,11 +271,11 @@ async function ensureOneDriveFolder(accessToken, folderName) {
 
 // Helper: upload file to OneDrive folder
 async function uploadToOneDrive(accessToken, folderName, file) {
-  await ensureOneDriveFolder(accessToken, folderName);
+  const { driveId } = await ensureOneDriveFolder(accessToken, folderName);
 
   const encodedName = encodeURIComponent(file.originalname);
   const uploadRes = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/root:/${folderName}/${encodedName}:/content`,
+    `https://graph.microsoft.com/v1.0/me/drives/${driveId}/root:/${folderName}/${encodedName}:/content`,
     {
       method: 'PUT',
       headers: {
@@ -279,7 +295,6 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   console.log(`Uploaded "${file.originalname}" to OneDrive folder "${folderName}"`);
   return uploaded;
 }
-
 
 app.post('/send-email', upload.single('file'), async (req, res) => {
   const accessToken = await getAccessToken();
