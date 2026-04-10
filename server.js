@@ -271,11 +271,16 @@ async function ensureOneDriveFolder(accessToken, folderName) {
 }
 
 async function uploadToOneDrive(accessToken, folderName, file) {
-  const folderId = await ensureOneDriveFolder(accessToken, folderName);
+  const driveId = 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6';
+  
+  // Get the folder ID first (for verification it exists)
+  await ensureOneDriveFolder(accessToken, folderName);
 
-  // Step 1: Create upload session using parent folder ID + filename
+  const encodedPath = encodeURIComponent(`${folderName}/${file.originalname}`);
+
+  // Create upload session using the drives/{driveId}/root:/{path}:/createUploadSession format
   const sessionRes = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${encodeURIComponent(file.originalname)}/createUploadSession`,
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${folderName}/${encodeURIComponent(file.originalname)}:/createUploadSession`,
     {
       method: 'POST',
       headers: {
@@ -297,8 +302,9 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   }
 
   const { uploadUrl } = await sessionRes.json();
+  console.log('Upload session created successfully');
 
-  // Step 2: Upload the raw bytes to the session URL
+  // Upload the raw bytes to the session URL
   const fileBuffer = file.buffer;
   const fileSize = fileBuffer.length;
 
