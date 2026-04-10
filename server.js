@@ -272,11 +272,10 @@ async function ensureOneDriveFolder(accessToken, folderName) {
 
 async function uploadToOneDrive(accessToken, folderName, file) {
   const folderId = await ensureOneDriveFolder(accessToken, folderName);
-  const encodedName = encodeURIComponent(file.originalname);
 
-  // Step 1: Create an upload session
+  // Step 1: Create upload session using parent folder ID + filename
   const sessionRes = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}:/${encodedName}:/createUploadSession`,
+    `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children/${encodeURIComponent(file.originalname)}/createUploadSession`,
     {
       method: 'POST',
       headers: {
@@ -293,13 +292,13 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   );
 
   if (!sessionRes.ok) {
-    const err = await sessionRes.json();
-    throw new Error(`Failed to create upload session: ${err.error?.message}`);
+    const sessionErr = await sessionRes.json();
+    throw new Error(`Failed to create upload session: ${JSON.stringify(sessionErr)}`);
   }
 
   const { uploadUrl } = await sessionRes.json();
 
-  // Step 2: Upload the file bytes to the session URL (no auth header needed here)
+  // Step 2: Upload the raw bytes to the session URL
   const fileBuffer = file.buffer;
   const fileSize = fileBuffer.length;
 
@@ -307,15 +306,15 @@ async function uploadToOneDrive(accessToken, folderName, file) {
     method: 'PUT',
     headers: {
       'Content-Type': file.mimetype || 'application/octet-stream',
-      'Content-Length': fileSize,
+      'Content-Length': String(fileSize),
       'Content-Range': `bytes 0-${fileSize - 1}/${fileSize}`,
     },
     body: fileBuffer,
   });
 
-  if (!uploadRes.ok && uploadRes.status !== 201) {
-    const err = await uploadRes.json();
-    throw new Error(`OneDrive upload failed: ${err.error?.message}`);
+  if (uploadRes.status !== 200 && uploadRes.status !== 201) {
+    const uploadErr = await uploadRes.json().catch(() => ({}));
+    throw new Error(`OneDrive upload failed: ${JSON.stringify(uploadErr)}`);
   }
 
   const uploaded = await uploadRes.json();
