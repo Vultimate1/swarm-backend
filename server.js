@@ -274,20 +274,46 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   const folderId = await ensureOneDriveFolder(accessToken, folderName);
   const encodedName = encodeURIComponent(file.originalname);
 
-  // Upload using the folder's item ID — no path syntax needed
-  const uploadRes = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}:/${encodedName}:/content`,
+  // Step 1: Create an upload session
+  const sessionRes = await fetch(
+    `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}:/${encodedName}:/createUploadSession`,
     {
-      method: 'PUT',
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': file.mimetype || 'application/octet-stream',
+        'Content-Type': 'application/json',
       },
-      body: file.buffer,
+      body: JSON.stringify({
+        item: {
+          '@microsoft.graph.conflictBehavior': 'replace',
+          name: file.originalname,
+        },
+      }),
     }
   );
 
-  if (!uploadRes.ok) {
+  if (!sessionRes.ok) {
+    const err = await sessionRes.json();
+    throw new Error(`Failed to create upload session: ${err.error?.message}`);
+  }
+
+  const { uploadUrl } = await sessionRes.json();
+
+  // Step 2: Upload the file bytes to the session URL (no auth header needed here)
+  const fileBuffer = file.buffer;
+  const fileSize = fileBuffer.length;
+
+  const uploadRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': file.mimetype || 'application/octet-stream',
+      'Content-Length': fileSize,
+      'Content-Range': `bytes 0-${fileSize - 1}/${fileSize}`,
+    },
+    body: fileBuffer,
+  });
+
+  if (!uploadRes.ok && uploadRes.status !== 201) {
     const err = await uploadRes.json();
     throw new Error(`OneDrive upload failed: ${err.error?.message}`);
   }
