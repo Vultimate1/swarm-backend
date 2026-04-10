@@ -221,7 +221,6 @@ async function getDriveRoot(accessToken) {
 }
 
 async function ensureOneDriveFolder(accessToken, folderName) {
-  // List root children and find folder by name
   const listRes = await fetch(
     'https://graph.microsoft.com/v1.0/me/drive/root/children',
     { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -238,12 +237,11 @@ async function ensureOneDriveFolder(accessToken, folderName) {
   );
 
   if (existing) {
-    console.log(`OneDrive folder "${folderName}" exists (id: ${existing.id})`);
+    console.log(`Found folder "${folderName}" with ID: ${existing.id}`);
     return existing.id;
   }
 
-  // Folder not found, create it
-  console.log(`OneDrive folder "${folderName}" not found, creating...`);
+  console.log(`Folder "${folderName}" not found, creating...`);
   const createRes = await fetch(
     'https://graph.microsoft.com/v1.0/me/drive/root/children',
     {
@@ -266,7 +264,7 @@ async function ensureOneDriveFolder(accessToken, folderName) {
   }
 
   const newFolder = await createRes.json();
-  console.log(`Created OneDrive folder "${folderName}" (id: ${newFolder.id})`);
+  console.log(`Created folder "${folderName}" with ID: ${newFolder.id}`);
   return newFolder.id;
 }
 
@@ -274,9 +272,8 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   const driveId = 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6';
   const folderId = await ensureOneDriveFolder(accessToken, folderName);
 
-  console.log(`Using folder ID: ${folderId}`);
+  console.log(`Creating upload session for folder ID: ${folderId}, file: ${file.originalname}`);
 
-  // Create upload session directly on the folder item
   const sessionRes = await fetch(
     `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/${encodeURIComponent(file.originalname)}:/createUploadSession`,
     {
@@ -300,7 +297,7 @@ async function uploadToOneDrive(accessToken, folderName, file) {
   }
 
   const { uploadUrl } = await sessionRes.json();
-  console.log('Upload session created successfully');
+  console.log('Upload session created, uploading bytes...');
 
   const fileBuffer = file.buffer;
   const fileSize = fileBuffer.length;
