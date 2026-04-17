@@ -144,7 +144,7 @@ app.get('/auth', (req, res) => {
     client_id: CLIENT_ID,
     response_type: 'code',
     redirect_uri: REDIRECT_URI,
-    scope: 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Files.ReadWrite.All offline_access',
+    scope: 'https://graph.microsoft.com/Mail.Send offline_access',
     response_mode: 'query',
   });
 
@@ -167,7 +167,7 @@ app.get('/auth/callback', async (req, res) => {
     code,
     redirect_uri: REDIRECT_URI,
     grant_type: 'authorization_code',
-    scope: 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Files.ReadWrite.All offline_access',
+    scope: 'https://graph.microsoft.com/Mail.Send offline_access',
   });
 
   try {
