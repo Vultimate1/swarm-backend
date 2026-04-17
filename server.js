@@ -409,6 +409,21 @@ app.get('/debug/upload-session', async (req, res) => {
   res.json({ status: sessionRes.status, body: await sessionRes.json() });
 });
 
+app.get('/debug/shared-folders', async (req, res) => {
+  const accessToken = await getAccessToken();
+  if (!accessToken) return res.status(401).json({ error: 'Not authenticated' });
+
+  try {
+    // List drives shared with you
+    const sharedRes = await fetch('https://graph.microsoft.com/v1.0/me/drive/sharedWithMe', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const sharedData = await sharedRes.json();
+    res.json(sharedData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post('/send-email', upload.single('file'), async (req, res) => {
   const accessToken = await getAccessToken();
