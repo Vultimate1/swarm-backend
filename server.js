@@ -75,7 +75,7 @@ const TOKEN_PATH = path.join(__dirname, 'token_cache.json');
 
 // getting computer IP address
 app.enable('trust proxy');
-app.get('/api/ip', (req, res) => {
+app.get('/ip', (req, res) => {
   try {
     const clientIP = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
     console.log("User IP: "+clientIP);
