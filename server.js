@@ -1,7 +1,6 @@
 /*require("dotenv").config();
-const express = require("express");
 const cors = require("cors");
-const multer = require("multer");
+
 const nodemailer = require("nodemailer");
 
 const app = express();
@@ -58,6 +57,8 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const express = require("express");
+const multer = require("multer");
 const upload = multer();
 
 const app = express();
