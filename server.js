@@ -54,12 +54,10 @@ app.listen(process.env.PORT || 5000, () => {
 
 
 
-const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const multer = require('multer');
 const upload = multer();
 
 const app = express();
@@ -73,6 +71,19 @@ const TENANT_ID = process.env.AZURE_TENANT_ID;
 const OUTLOOK_EMAIL = process.env.OUTLOOK_EMAIL;
 const REDIRECT_URI = 'https://swarm-backend-ga0y.onrender.com/auth/callback';
 const TOKEN_PATH = path.join(__dirname, 'token_cache.json');
+
+// getting computer IP address
+app.enable('trust proxy');
+app.get('/api/ip', (req, res) => {
+  try {
+    const clientIP = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
+    console.log("User IP: "+clientIP);
+  } catch (err) {
+    console.error('Callback error:', err);
+    res.status(500).send('Auth failed: ' + err.message);
+  }
+});
+
 
 // Load token from disk if exists
 let tokenData = null;
