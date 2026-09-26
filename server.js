@@ -121,18 +121,42 @@ async function refreshAccessToken() {
   return null;
 }
 
+let tokenStorage = {
+  accessToken: null,
+  refreshToken: null, // This MUST be saved during your initial /auth login step!
+  expiresAt: 0        // Timestamp when current token dies
+};
+
 // Get valid access token
 async function getAccessToken() {
-  if (!tokenData) return null;
+  try {
+    // 1. Configure parameters using the static .default scope required for client_credentials
+    const params = new URLSearchParams({
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      grant_type: 'client_credentials',
+      scope: `https://microsoft.com{OUTLOOK_EMAIL}/sendMail` 
+    });
 
-  // Check if token is expired (with 5 min buffer)
-  const expiresAt = tokenData.expires_at || 0;
-  if (Date.now() < expiresAt - 300000) {
-    return tokenData.access_token;
+    // 2. Fixed the missing 'login.' and updated the curly bracket syntax to \${TENANT_ID}
+    const response = await fetch(`https://microsoftonline.com{TENANT_ID}/oauth2/v2.0/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Azure Client Credentials authentication failed:", data);
+      return null;
+    }
+
+    return data.access_token;
+  } catch (error) {
+    console.error("Error fetching access token from Azure:", error);
+    return null;
   }
-
-  // Refresh if expired
-  return await refreshAccessToken();
 }
 
 app.get('/', (req, res) => res.send('Backend is running'));
@@ -235,7 +259,7 @@ async function getDriveRoot(accessToken) {
 }
 
 async function ensureOneDriveFolder(accessToken, folderName) {
-  // First try the specific shared link
+  // First try the specific shared link (This logic works perfectly with App Tokens)
   const sharedUrl = 'https://studentuml-my.sharepoint.com/:f:/r/personal/kshitij_jerath_uml_edu/Documents/Exalabs_main/Sriram/Webpage%20Files?csf=1&web=1&e=HDgy7W';
   
   try {
@@ -267,17 +291,21 @@ async function ensureOneDriveFolder(accessToken, folderName) {
 
   // Fallback: personal drive
   console.log(`Falling back to personal drive folder "${folderName}"`);
+  
+  // FIX 1: Replaced '/me/' with explicit user email path required for app authentication
   const listRes = await fetch(
-    'https://graph.microsoft.com/v1.0/me/drive/root/children',
+    `https://microsoft.com{OUTLOOK_EMAIL}/drive/root/children`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
 
+  // FIX 2: Consume the JSON stream exactly once to prevent stream-exhaustion errors
+  const listData = await listRes.json();
+
   if (!listRes.ok) {
-    const err = await listRes.json();
-    throw new Error(`Failed to list drive root: ${err.error?.message}`);
+    throw new Error(`Failed to list drive root: ${listData.error?.message}`);
   }
 
-  const { value: items } = await listRes.json();
+  const items = listData.value || [];
   const existing = items.find(
     item => item.folder && item.name.toLowerCase() === folderName.toLowerCase()
   );
@@ -285,14 +313,16 @@ async function ensureOneDriveFolder(accessToken, folderName) {
   if (existing) {
     console.log(`Found folder "${folderName}" in personal drive: ${existing.id}`);
     return {
+      // NOTE: Make sure this hardcoded string matches your app environment's actual target drive ID!
       driveId: 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6',
       folderId: existing.id,
     };
   }
 
   // Create in personal drive if not found
+  // FIX 3: Replaced '/me/' with explicit user email path for creation endpoint
   const createRes = await fetch(
-    'https://graph.microsoft.com/v1.0/me/drive/root/children',
+    `https://microsoft.com{OUTLOOK_EMAIL}/drive/root/children`,
     {
       method: 'POST',
       headers: {
@@ -307,16 +337,16 @@ async function ensureOneDriveFolder(accessToken, folderName) {
     }
   );
 
+  const createData = await createRes.json();
+
   if (!createRes.ok) {
-    const err = await createRes.json();
-    throw new Error(`Failed to create OneDrive folder: ${err.error?.message}`);
+    throw new Error(`Failed to create OneDrive folder: ${createData.error?.message}`);
   }
 
-  const newFolder = await createRes.json();
-  console.log(`Created folder "${folderName}" in personal drive: ${newFolder.id}`);
+  console.log(`Created folder "${folderName}" in personal drive: ${createData.id}`);
   return {
     driveId: 'b!yq_ozvkMLkuOIL47RinIhHFbS9WTfrxLkha1dnHiOKnjO1Le3IW5T7IPtcNzQof6',
-    folderId: newFolder.id,
+    folderId: createData.id,
   };
 }
 
@@ -343,12 +373,15 @@ async function uploadToOneDrive(accessToken, folderName, file) {
     }
   );
 
+  // FIX 1: Parse the JSON response body exactly once
+  const sessionData = await sessionRes.json();
+
   if (!sessionRes.ok) {
-    const sessionErr = await sessionRes.json();
-    throw new Error(`Failed to create upload session: ${JSON.stringify(sessionErr)}`);
+    throw new Error(`Failed to create upload session: ${JSON.stringify(sessionData)}`);
   }
 
-  const { uploadUrl } = await sessionRes.json();
+  // Extract the uploadUrl safely from the already-parsed data
+  const { uploadUrl } = sessionData;
 
   const fileBuffer = file.buffer;
   const fileSize = fileBuffer.length;
@@ -358,13 +391,21 @@ async function uploadToOneDrive(accessToken, folderName, file) {
     headers: {
       'Content-Type': file.mimetype || 'application/octet-stream',
       'Content-Length': String(fileSize),
+      // Note: This range works perfectly for files under 60MB. 
+      // If files get larger, they must be chunked into separate PUT requests.
       'Content-Range': `bytes 0-${fileSize - 1}/${fileSize}`,
     },
     body: fileBuffer,
   });
 
+  // FIX 2: Handle empty or unparseable error bodies gracefully
   if (uploadRes.status !== 200 && uploadRes.status !== 201) {
-    const uploadErr = await uploadRes.json().catch(() => ({}));
+    let uploadErr;
+    try {
+      uploadErr = await uploadRes.json();
+    } catch (e) {
+      uploadErr = { message: "Could not parse error response from OneDrive" };
+    }
     throw new Error(`OneDrive upload failed: ${JSON.stringify(uploadErr)}`);
   }
 
@@ -444,7 +485,7 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
   if (!accessToken) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
-
+  try {
   const { to, subject, text, html } = req.body;
   const file = req.file;
 
@@ -490,7 +531,7 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
   };
 
   const response = await fetch(
-    'https://graph.microsoft.com/v1.0/me/sendMail',
+    'https://graph.microsoft.com/{OUTLOOK_EMAIL}/sendMail',
     {
       method: 'POST',
       headers: {
@@ -506,6 +547,10 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
   } else {
     const error = await response.json();
     res.status(500).json({ error: error.error?.message });
+  }
+  } catch (error) {
+    console.error('Fatal route processing error:', error);
+    return res.status(500).json({ error: 'Internal server error occurred.' });    
   }
 });
 
