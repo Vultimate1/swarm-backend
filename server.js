@@ -130,16 +130,14 @@ let tokenStorage = {
 // Get valid access token
 async function getAccessToken() {
   try {
-    // 1. Configure parameters using the static .default scope required for client_credentials
     const params = new URLSearchParams({
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
       grant_type: 'client_credentials',
-      scope: `https://microsoft.com{OUTLOOK_EMAIL}/sendMail` 
+      scope: 'https://microsoft.com' // ⚠️ FIXED: Changed to ://microsoft.com
     });
 
-    // 2. Fixed the missing 'login.' and updated the curly bracket syntax to \${TENANT_ID}
-    const response = await fetch(`https://microsoftonline.com{TENANT_ID}/oauth2/v2.0/token`, {
+    const response = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params
@@ -151,7 +149,6 @@ async function getAccessToken() {
       console.error("Azure Client Credentials authentication failed:", data);
       return null;
     }
-
     return data.access_token;
   } catch (error) {
     console.error("Error fetching access token from Azure:", error);
@@ -237,7 +234,10 @@ app.get('/auth/callback', async (req, res) => {
 // Check auth status
 app.get('/auth/status', async (req, res) => {
   const token = await getAccessToken();
-  res.json({ authenticated: !!token });
+  res.json({ 
+    authenticated: !!token,
+    message: token ? "App authenticated successfully via Client Credentials" : "Authentication failed" 
+  });
 });
 
 
@@ -465,7 +465,7 @@ app.get('/debug/upload-session', async (req, res) => {
 });
 
 app.get('/debug/shared-folders', async (req, res) => {
-  const accessToken = await getAccessToken();
+  const accessToken = await getAccessToken(req);
   if (!accessToken) return res.status(401).json({ error: 'Not authenticated' });
 
   try {
