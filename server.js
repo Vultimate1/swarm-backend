@@ -380,7 +380,6 @@ async function uploadToOneDrive(accessToken, folderName, file) {
     }
   );
 
-  // FIX 1: Parse the JSON response body exactly once
   const sessionData = await sessionRes.json();
 
   if (!sessionRes.ok) {
@@ -405,7 +404,6 @@ async function uploadToOneDrive(accessToken, folderName, file) {
     body: fileBuffer,
   });
 
-  // FIX 2: Handle empty or unparseable error bodies gracefully
   if (uploadRes.status !== 200 && uploadRes.status !== 201) {
     let uploadErr;
     try {
@@ -472,7 +470,7 @@ app.get('/debug/upload-session', async (req, res) => {
 });
 
 app.get('/debug/shared-folders', async (req, res) => {
-  const accessToken = await getAccessToken(req);
+  const accessToken = await getAccessToken();
   if (!accessToken) return res.status(401).json({ error: 'Not authenticated' });
 
   try {
@@ -492,7 +490,7 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
   if (!accessToken) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
-  try {
+
   const { to, subject, text, html } = req.body;
   const file = req.file;
 
@@ -554,10 +552,6 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
   } else {
     const error = await response.json();
     res.status(500).json({ error: error.error?.message });
-  }
-  } catch (error) {
-    console.error('Fatal route processing error:', error);
-    return res.status(500).json({ error: 'Internal server error occurred.' });    
   }
 });
 
