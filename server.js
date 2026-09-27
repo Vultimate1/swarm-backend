@@ -452,62 +452,76 @@ app.post('/send-email', upload.single('file'), async (req, res) => {
     return res.status(400).json({ error: 'Missing fields' });
   }
 
-  console.log("BODY:", req.body);
-  console.log("FILE:", req.file);
+  // 1. Immediately tell the user the request was received successfully!
+  // This eliminates the 2-3 second UI freeze.
+  res.json({ success: true, message: "Submission received and processing." });
 
-  // Upload to OneDrive if a file was provided
-  if (file) {
+  // 2. Process the heavy lifting in the background without making the user wait
+  // Wrap this in an immediately invoked async function (IIFE) or just run it directly
+  (async () => {
     try {
-      await uploadToOneDrive(accessToken, ONEDRIVE_FOLDER, file);
-    } catch (err) {
-      console.error('OneDrive upload error:', err.message);
-      return res.status(500).json({ error: `OneDrive upload failed: ${err.message}` });
-    }
-  }
+      console.log("BODY:", req.body);
+      console.log("FILE:", req.file);
 
-  const attachments = file
-    ? [
-        {
-          '@odata.type': '#microsoft.graph.fileAttachment',
-          name: file.originalname,
-          contentType: file.mimetype,
-          contentBytes: file.buffer.toString('base64'),
+      // Upload to OneDrive in background
+      if (file) {
+        try {
+          await uploadToOneDrive(accessToken, ONEDRIVE_FOLDER, file);
+        } catch (err) {
+          console.error('Background OneDrive upload error:', err.message);
+          // Note: Since res.json was already sent, we just log the errors on the server console
+          return; 
+        }
+      }
+
+      const attachments = file
+        ? [
+            {
+              '@odata.type': '#microsoft.graph.fileAttachment',
+              name: file.originalname,
+              contentType: file.mimetype,
+              contentBytes: file.buffer.toString('base64'),
+            },
+          ]
+        : [];
+
+      const message = {
+        message: {
+          subject,
+          body: {
+            contentType: html ? 'HTML' : 'Text',
+            content: html || text,
+          },
+          toRecipients: [{ emailAddress: { address: to } }],
+          attachments,
         },
-      ]
-    : [];
+        saveToSentItems: true,
+      };
 
-  const message = {
-    message: {
-      subject,
-      body: {
-        contentType: html ? 'HTML' : 'Text',
-        content: html || text,
-      },
-      toRecipients: [{ emailAddress: { address: to } }],
-      attachments,
-    },
-    saveToSentItems: true,
-  };
+      const response = await fetch(
+        'https://graph.microsoft.com/v1.0/me/sendMail',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(message),
+        }
+      );
 
-  const response = await fetch(
-    'https://graph.microsoft.com/v1.0/me/sendMail',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
+      if (response.status === 202) {
+        console.log("🚀 Background Email Sent Successfully.");
+      } else {
+        const error = await response.json();
+        console.error('Background Email Dispatch Error:', error.error?.message);
+      }
+    } catch (error) {
+      console.error('Fatal background processing error:', error);
     }
-  );
-
-  if (response.status === 202) {
-    res.json({ success: true });
-  } else {
-    const error = await response.json();
-    res.status(500).json({ error: error.error?.message });
-  }
+  })(); // Runs automatically in the background
 });
+
 
 
 /* EMAIL-ONLY POST RESPONSE
