@@ -130,14 +130,16 @@ let tokenStorage = {
 // Get valid access token
 async function getAccessToken() {
   try {
+    console.log("🔄 Requesting fresh token from Azure for Tenant:", TENANT_ID);
+    
     const params = new URLSearchParams({
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
       grant_type: 'client_credentials',
-      scope: 'https://microsoft.com' // ⚠️ FIXED: Changed to ://microsoft.com
+      scope: 'https://microsoft.com'
     });
 
-    const response = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
+    const response = await fetch(`https://microsoftonline.com{TENANT_ID}/oauth2/v2.0/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params
@@ -146,12 +148,17 @@ async function getAccessToken() {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Azure Client Credentials authentication failed:", data);
+      // ⚠️ CRITICAL DIAGNOSTIC: This print will reveal the exact cause of your 401 error
+      console.error("❌ CRITICAL: Azure rejected token request!");
+      console.error("Error Code:", data.error);
+      console.error("Error Description:", data.error_description);
       return null;
     }
+
+    console.log("✅ Token successfully generated via Client Credentials.");
     return data.access_token;
   } catch (error) {
-    console.error("Error fetching access token from Azure:", error);
+    console.error("💥 Network/Fatal error during token extraction:", error);
     return null;
   }
 }
